@@ -39,3 +39,35 @@ secrets.properties
 
 # Local configuration
 local.properties
+
+# Layout Inspector captures
+/layout-inspector/
+
+# Lint
+lint/intermediates/
+lint/generated/
+lint/outputs/
+lint/tmp/
+
+# Android Profiler
+*.hprof
+
+# Backup files
+*~
+*.bak
+*.swp
+*.tmp
+
+# Version control
+.svn/
+.hg/
+
+# APK outputs
+/app/debug/
+/app/benchmark/
+output.json
+output-metadata.json
+
+git token
+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
+

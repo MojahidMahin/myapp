@@ -64,4 +64,14 @@ dependencies {
 // or latest
     implementation("com.google.firebase:firebase-auth-ktx:22.1.1")
 // or latest
+    
+
+    // MediaPipe for LLM
+    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-vision:0.10.14")
+    
+    // Image handling
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    
+    // Note: activity-result is included in activity-compose, no separate dependency needed
 }
