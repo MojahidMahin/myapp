@@ -7,6 +7,14 @@ import android.os.Looper
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
+import androidx.compose.ui.*
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.example.telegrambotcompose.ui.TelegramBotDynamicScreen
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.BackgroundServiceManager
@@ -25,7 +33,22 @@ class MainActivity : ComponentActivity() {
         backgroundServiceManager.startBackgroundService()
         
         setContent {
-            SignInScreen(authViewModel)
+
+
+            val navController = rememberNavController()
+            NavHost(navController, startDestination = "sign_in") {
+                composable("sign_in") { SignInScreen(authViewModel) }
+                composable("telegram_bot") { TelegramBotDynamicScreen() }
+            }
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Button(onClick = { navController.navigate("telegram_bot") }) {
+                    Text("Open Telegram Bot")
+                }
+            }
         }
         
         // Request permissions after UI is ready (optional)
