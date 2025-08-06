@@ -1,0 +1,41 @@
+# IDE specific files
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+
+# Build outputs
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+/*/build/
+/app/release/
+
+# Firebase configs
+google-services.json
+**/google-services.json
+
+# Keystore files
+*.jks
+*.keystore
+keystore.properties
+/keystore/
+
+# Sensitive configuration
+*.properties
+!gradle.properties
+.env
+.env.*
+debug.properties
+release.properties
+secrets.properties
+
+# Local configuration
+local.properties
