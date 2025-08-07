@@ -86,10 +86,13 @@ private fun getFileName(context: android.content.Context, uri: Uri): String? {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(viewModel: ChatViewModel) {
+    Log.d("ChatScreen", "ChatScreen composable called")
     val chatSession by viewModel.chatSession
     val isModelLoading by viewModel.isModelLoading
     val isGeneratingResponse by viewModel.isGeneratingResponse
     val currentModelPath by viewModel.currentModelPath
+    
+    Log.d("ChatScreen", "State loaded - modelLoading: $isModelLoading, modelPath: $currentModelPath")
     
     var messageText by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
@@ -124,8 +127,21 @@ fun ChatScreen(viewModel: ChatViewModel) {
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         selectedImageUri = uri
-        // Convert URI to Bitmap here if needed
-        // For now, we'll handle bitmap conversion in the viewModel
+        uri?.let { 
+            try {
+                // Convert URI to Bitmap immediately for multimodal processing
+                val inputStream = context.contentResolver.openInputStream(it)
+                val bitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+                
+                selectedImageBitmap = bitmap
+                Log.d("ChatScreen", "Image loaded as bitmap: ${bitmap?.width}x${bitmap?.height}")
+            } catch (e: Exception) {
+                Log.e("ChatScreen", "Failed to load image as bitmap", e)
+                selectedImageBitmap = null
+                selectedImageUri = null
+            }
+        }
     }
     
     // Auto scroll to bottom when new messages arrive

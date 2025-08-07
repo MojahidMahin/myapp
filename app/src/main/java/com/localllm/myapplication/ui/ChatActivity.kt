@@ -1,6 +1,7 @@
 package com.localllm.myapplication.ui
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,19 +13,41 @@ import com.localllm.myapplication.ui.screen.ChatScreen
 
 class ChatActivity : ComponentActivity() {
 
-    private val chatViewModel by lazy { AppContainer.provideChatViewModel(this) }
+    companion object {
+        private const val TAG = "ChatActivity"
+    }
+
+    private val chatViewModel by lazy { 
+        Log.d(TAG, "Creating ChatViewModel...")
+        val viewModel = AppContainer.provideChatViewModel(this)
+        Log.d(TAG, "ChatViewModel created successfully")
+        viewModel
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    ChatScreen(viewModel = chatViewModel)
+        Log.d(TAG, "ChatActivity onCreate() called")
+        
+        try {
+            Log.d(TAG, "Setting content...")
+            setContent {
+                Log.d(TAG, "Inside setContent block")
+                MaterialTheme {
+                    Log.d(TAG, "Inside MaterialTheme block")
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
+                    ) {
+                        Log.d(TAG, "Inside Surface block, about to call ChatScreen")
+                        ChatScreen(viewModel = chatViewModel)
+                        Log.d(TAG, "ChatScreen called successfully")
+                    }
                 }
             }
+            Log.d(TAG, "setContent completed successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in onCreate", e)
+            throw e
         }
     }
 

@@ -7,6 +7,7 @@ import com.localllm.myapplication.command.SignInCommand
 import com.localllm.myapplication.data.FirebaseAuthRepository
 import com.localllm.myapplication.data.LLMRepository
 import com.localllm.myapplication.data.MediaPipeLLMRepository
+import com.localllm.myapplication.data.HybridLLMRepository
 import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.BackgroundServiceManager
 import com.localllm.myapplication.ui.viewmodel.AuthViewModel
@@ -38,7 +39,7 @@ object AppContainer {
 
     fun provideLLMRepository(context: Context): LLMRepository {
         if (llmRepository == null) {
-            llmRepository = MediaPipeLLMRepository(context.applicationContext)
+            llmRepository = HybridLLMRepository(context.applicationContext)
         }
         return llmRepository!!
     }
