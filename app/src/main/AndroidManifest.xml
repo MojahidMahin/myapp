@@ -61,6 +61,7 @@
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -96,6 +97,18 @@
             android:name=".ui.ChatActivity"
             android:exported="false"
             android:label="Local LLM Chat"
+            android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".ui.AIGalleryActivity"
+            android:exported="false"
+            android:label="AI Gallery"
+            android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".ui.AIAnalysisActivity"
+            android:exported="false"
+            android:label="AI Analysis Center"
             android:theme="@style/Theme.MyApplication" />
     </application>
 

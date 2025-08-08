@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.localllm.myapplication.data.ChatMessage
 import com.localllm.myapplication.ui.viewmodel.ChatViewModel
+import com.localllm.myapplication.ui.AIAnalysisActivity
 import java.io.File
 
 // Helper functions for file handling
@@ -178,6 +180,15 @@ fun ChatScreen(viewModel: ChatViewModel) {
                 }
             },
             actions = {
+                IconButton(
+                    onClick = {
+                        val intent = android.content.Intent(context, AIAnalysisActivity::class.java)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = "AI Analysis")
+                }
+                
                 Button(
                     onClick = { 
                         Log.d("ChatScreen", "Model picker button clicked")

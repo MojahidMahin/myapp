@@ -1,18 +1,19 @@
 package com.localllm.myapplication.ui.viewmodel
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.localllm.myapplication.command.ChatCommand
-import com.localllm.myapplication.command.LoadModelCommand
 import com.localllm.myapplication.data.ChatMessage
 import com.localllm.myapplication.data.ChatSession
-import com.localllm.myapplication.data.LLMRepository
-import com.localllm.myapplication.data.HybridLLMRepository
 import com.localllm.myapplication.data.MessageType
+import com.localllm.myapplication.service.ai.MediaPipeLLMService
+import kotlinx.coroutines.launch
 
-class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
+class ChatViewModel(private val context: Context) : ViewModel() {
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -23,50 +24,60 @@ class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
     val isGeneratingResponse = mutableStateOf(false)
     val currentModelPath = mutableStateOf<String?>(null)
     val modelLoadError = mutableStateOf<String?>(null)
+    
+    private val mediaPipeLLMService = MediaPipeLLMService(context)
 
     fun loadModel(modelPath: String) {
         isModelLoading.value = true
         currentModelPath.value = modelPath
         modelLoadError.value = null
         
-        val loadCommand = LoadModelCommand(
-            llmRepository = llmRepository,
-            modelPath = modelPath,
-            onSuccess = {
-                Log.d(TAG, "Model loaded successfully")
-                isModelLoading.value = false
-                modelLoadError.value = null
-                chatSession.value = chatSession.value.copy(
-                    modelPath = modelPath,
-                    isModelLoaded = true
-                )
-                // Add success message to chat with repository info
-                val repositoryType = if (llmRepository is HybridLLMRepository) {
-                    llmRepository.getCurrentRepositoryType()
-                } else {
-                    "MediaPipe"
-                }
+        viewModelScope.launch {
+            try {
+                Log.d(TAG, "Loading MediaPipe model: $modelPath")
                 
-                val successMessage = ChatMessage(
-                    text = "Model loaded successfully using $repositoryType! You can now start chatting.",
-                    isFromUser = false
+                val result = mediaPipeLLMService.initialize(modelPath)
+                
+                result.fold(
+                    onSuccess = {
+                        Log.d(TAG, "MediaPipe model loaded successfully")
+                        isModelLoading.value = false
+                        modelLoadError.value = null
+                        chatSession.value = chatSession.value.copy(
+                            modelPath = modelPath,
+                            isModelLoaded = true
+                        )
+                        
+                        val successMessage = ChatMessage(
+                            text = "MediaPipe LLM model loaded successfully! You can now start chatting with image support.",
+                            isFromUser = false
+                        )
+                        addMessage(successMessage)
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Failed to load MediaPipe model", error)
+                        isModelLoading.value = false
+                        modelLoadError.value = error.message
+                        
+                        val errorMessage = ChatMessage(
+                            text = "Error loading MediaPipe model: ${error.message}",
+                            isFromUser = false
+                        )
+                        addMessage(errorMessage)
+                    }
                 )
-                addMessage(successMessage)
-            },
-            onError = { error ->
-                Log.e(TAG, "Failed to load model", error)
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception during model loading", e)
                 isModelLoading.value = false
-                modelLoadError.value = error.message
-                // Add error message to chat
+                modelLoadError.value = e.message
+                
                 val errorMessage = ChatMessage(
-                    text = "Error loading model: ${error.message}",
+                    text = "Exception loading model: ${e.message}",
                     isFromUser = false
                 )
                 addMessage(errorMessage)
             }
-        )
-        
-        loadCommand.execute()
+        }
     }
 
     fun sendMessage(text: String, image: Bitmap? = null) {
@@ -82,7 +93,7 @@ class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
         addMessage(userMessage)
         
         // Check if model is loaded
-        if (!llmRepository.isModelLoaded()) {
+        if (!mediaPipeLLMService.isModelLoaded()) {
             val errorMessage = ChatMessage(
                 text = "Please load a model first to start chatting.",
                 isFromUser = false
@@ -91,19 +102,38 @@ class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
             return
         }
         
-        // Generate response
+        // Generate response using MediaPipe
         isGeneratingResponse.value = true
         
+        // Add loading message that gets updated with streaming response
+        var currentResponseMessage: ChatMessage? = null
+        
         val chatCommand = ChatCommand(
-            llmRepository = llmRepository,
+            mediaPipeLLMService = mediaPipeLLMService,
             prompt = text,
             image = image,
+            onPartialResponse = { partialText ->
+                // Update the current response message with streaming text
+                if (currentResponseMessage == null) {
+                    currentResponseMessage = ChatMessage(
+                        text = partialText,
+                        isFromUser = false,
+                        messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
+                    )
+                    addMessage(currentResponseMessage!!)
+                } else {
+                    updateLastMessage(partialText)
+                }
+            },
             onResponse = { responseMessage ->
-                addMessage(responseMessage)
+                // Final response received
+                if (currentResponseMessage == null) {
+                    addMessage(responseMessage)
+                }
                 isGeneratingResponse.value = false
             },
             onError = { error ->
-                Log.e(TAG, "Chat command failed", error)
+                Log.e(TAG, "MediaPipe chat command failed", error)
                 val errorMessage = ChatMessage(
                     text = "Error generating response: ${error.message}",
                     isFromUser = false
@@ -123,12 +153,19 @@ class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
     }
 
     fun unloadModel() {
-        llmRepository.unloadModel()
+        mediaPipeLLMService.cleanup()
         chatSession.value = chatSession.value.copy(
             modelPath = null,
             isModelLoaded = false
         )
         currentModelPath.value = null
+    }
+    
+    fun resetSession() {
+        viewModelScope.launch {
+            mediaPipeLLMService.resetSession()
+            clearChat()
+        }
     }
 
     private fun addMessage(message: ChatMessage) {
@@ -136,9 +173,20 @@ class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
         currentMessages.add(message)
         chatSession.value = chatSession.value.copy(messages = currentMessages)
     }
+    
+    private fun updateLastMessage(newText: String) {
+        val currentMessages = chatSession.value.messages.toMutableList()
+        if (currentMessages.isNotEmpty()) {
+            val lastMessage = currentMessages.last()
+            if (!lastMessage.isFromUser) {
+                currentMessages[currentMessages.lastIndex] = lastMessage.copy(text = newText)
+                chatSession.value = chatSession.value.copy(messages = currentMessages)
+            }
+        }
+    }
 
     override fun onCleared() {
         super.onCleared()
-        llmRepository.unloadModel()
+        mediaPipeLLMService.cleanup()
     }
 }

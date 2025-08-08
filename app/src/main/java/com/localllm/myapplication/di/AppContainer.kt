@@ -12,12 +12,14 @@ import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.BackgroundServiceManager
 import com.localllm.myapplication.ui.viewmodel.AuthViewModel
 import com.localllm.myapplication.ui.viewmodel.ChatViewModel
+import com.localllm.myapplication.ui.viewmodel.AIGalleryViewModel
 
 object AppContainer {
     private var backgroundServiceManager: BackgroundServiceManager? = null
     private var permissionManager: PermissionManager? = null
     private var llmRepository: LLMRepository? = null
     private var chatViewModel: ChatViewModel? = null
+    private var aiGalleryViewModel: AIGalleryViewModel? = null
 
     fun provideAuthViewModel(activity: Activity): AuthViewModel {
         val authRepository = FirebaseAuthRepository(activity)
@@ -46,10 +48,16 @@ object AppContainer {
 
     fun provideChatViewModel(context: Context): ChatViewModel {
         if (chatViewModel == null) {
-            val repository = provideLLMRepository(context)
-            chatViewModel = ChatViewModel(repository)
+            chatViewModel = ChatViewModel(context)
         }
         return chatViewModel!!
+    }
+
+    fun provideAIGalleryViewModel(context: Context): AIGalleryViewModel {
+        if (aiGalleryViewModel == null) {
+            aiGalleryViewModel = AIGalleryViewModel(context)
+        }
+        return aiGalleryViewModel!!
     }
 
     fun cleanup() {
@@ -59,5 +67,6 @@ object AppContainer {
         llmRepository?.unloadModel()
         llmRepository = null
         chatViewModel = null
+        aiGalleryViewModel = null
     }
 }

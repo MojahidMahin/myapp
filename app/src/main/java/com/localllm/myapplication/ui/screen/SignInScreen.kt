@@ -16,6 +16,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.localllm.myapplication.command.BackgroundWorkCommand
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.ui.ChatActivity
+import com.localllm.myapplication.ui.AIGalleryActivity
 import com.localllm.myapplication.ui.viewmodel.AuthViewModel
 
 @Composable
@@ -235,6 +236,18 @@ fun SignInScreen(viewModel: AuthViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("🤖 Local LLM Chat")
+                }
+                
+                // AI Gallery button
+                Button(
+                    onClick = {
+                        Log.d("UI", "AI Gallery button clicked - starting AIGalleryActivity")
+                        val intent = Intent(context, AIGalleryActivity::class.java)
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("🎨 AI Gallery (Full Features)")
                 }
             } else {
                 Button(onClick = { viewModel.signIn() }) {

@@ -3,14 +3,18 @@ package com.localllm.myapplication.command
 import android.graphics.Bitmap
 import android.util.Log
 import com.localllm.myapplication.data.ChatMessage
-import com.localllm.myapplication.data.LLMRepository
 import com.localllm.myapplication.data.MessageType
+import com.localllm.myapplication.service.ai.MediaPipeLLMService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class ChatCommand(
-    private val llmRepository: LLMRepository,
+    private val mediaPipeLLMService: MediaPipeLLMService,
     private val prompt: String,
     private val image: Bitmap? = null,
     private val onResponse: (ChatMessage) -> Unit,
+    private val onPartialResponse: ((String) -> Unit)? = null,
     private val onError: (Exception) -> Unit = {}
 ) : BackgroundCommand {
 
@@ -19,36 +23,48 @@ class ChatCommand(
     }
 
     override fun execute() {
-        Log.d(TAG, "Processing chat request: ${getExecutionTag()}")
+        Log.d(TAG, "Processing chat request with MediaPipe: ${getExecutionTag()}")
         
-        Thread {
+        CoroutineScope(Dispatchers.Main).launch {
             try {
-                val responseText = if (image != null) {
-                    kotlinx.coroutines.runBlocking {
-                        llmRepository.generateMultimodalResponse(prompt, image)
-                    }
-                } else {
-                    kotlinx.coroutines.runBlocking {
-                        llmRepository.generateTextResponse(prompt)
-                    }
-                }
+                val images = if (image != null) listOf(image) else emptyList()
                 
-                val responseMessage = ChatMessage(
-                    text = responseText,
-                    image = null,
-                    isFromUser = false,
-                    messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
+                var currentPartialResponse = ""
+                val result = mediaPipeLLMService.generateResponse(
+                    prompt = prompt,
+                    images = images,
+                    onPartialResult = { partialText ->
+                        currentPartialResponse = partialText
+                        onPartialResponse?.invoke(partialText)
+                    }
                 )
                 
-                onResponse(responseMessage)
-                onExecutionComplete()
+                result.fold(
+                    onSuccess = { responseText ->
+                        val finalResponse = if (responseText.isNotEmpty()) responseText else currentPartialResponse
+                        val responseMessage = ChatMessage(
+                            text = finalResponse,
+                            image = null,
+                            isFromUser = false,
+                            messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
+                        )
+                        
+                        onResponse(responseMessage)
+                        onExecutionComplete()
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "MediaPipe chat failed", error)
+                        onError(error as Exception)
+                        onExecutionFailed(error as Exception)
+                    }
+                )
                 
             } catch (e: Exception) {
                 Log.e(TAG, "Chat command failed", e)
                 onError(e)
                 onExecutionFailed(e)
             }
-        }.start()
+        }
     }
 
     override fun canExecuteInBackground(): Boolean = true

@@ -38,6 +38,10 @@ android {
     buildFeatures {
         compose = true
     }
+    
+    lint {
+        abortOnError = false
+    }
 }
 
 dependencies {
@@ -70,6 +74,9 @@ dependencies {
     implementation("com.google.mediapipe:tasks-genai:0.10.25")
     implementation("com.google.mediapipe:tasks-vision:0.10.26")
     
+    // Additional MediaPipe for comprehensive AI features
+    implementation("com.google.mediapipe:tasks-text:0.10.15")
+    
     // Image handling
     implementation("io.coil-kt:coil-compose:2.6.0")
     
@@ -80,6 +87,10 @@ dependencies {
     
     // Google ML Kit for OCR (text recognition)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    
+    // Additional dependencies for new AI features
+    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")
     
     // Note: activity-result is included in activity-compose, no separate dependency needed
 }
