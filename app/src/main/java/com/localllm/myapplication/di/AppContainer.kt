@@ -10,6 +10,7 @@ import com.localllm.myapplication.data.MediaPipeLLMRepository
 import com.localllm.myapplication.data.HybridLLMRepository
 import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.BackgroundServiceManager
+import com.localllm.myapplication.service.ModelManager
 import com.localllm.myapplication.ui.viewmodel.AuthViewModel
 import com.localllm.myapplication.ui.viewmodel.ChatViewModel
 import com.localllm.myapplication.ui.viewmodel.AIGalleryViewModel
@@ -48,14 +49,20 @@ object AppContainer {
 
     fun provideChatViewModel(context: Context): ChatViewModel {
         if (chatViewModel == null) {
-            chatViewModel = ChatViewModel(context)
+            val modelManager = provideModelManager(context)
+            chatViewModel = ChatViewModel(context, modelManager)
         }
         return chatViewModel!!
     }
 
+    fun provideModelManager(context: Context): ModelManager {
+        return ModelManager.getInstance(context)
+    }
+
     fun provideAIGalleryViewModel(context: Context): AIGalleryViewModel {
         if (aiGalleryViewModel == null) {
-            aiGalleryViewModel = AIGalleryViewModel(context)
+            val modelManager = provideModelManager(context)
+            aiGalleryViewModel = AIGalleryViewModel(context, modelManager)
         }
         return aiGalleryViewModel!!
     }

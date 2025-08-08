@@ -66,8 +66,18 @@ fun AIGalleryScreen(
                 }
             },
             actions = {
+                if (selectedFeature != null) {
+                    IconButton(onClick = { viewModel.goBackToFeatureSelection() }) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back to Features")
+                    }
+                }
                 IconButton(onClick = { viewModel.resetSession() }) {
                     Icon(Icons.Default.Refresh, contentDescription = "Reset")
+                }
+                if (isProcessing) {
+                    IconButton(onClick = { viewModel.stopGeneration() }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Stop Generation")
+                    }
                 }
             }
         )
@@ -206,11 +216,22 @@ fun ModelLoadingSection(
                     Text("Loading model...")
                 }
             } else {
-                Button(
-                    onClick = { onLoadModel("/data/user/0/com.localllm.myapplication/cache/gemma-3n-E2B-it-int4.task") },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Load Default Model")
+                Column {
+                    Button(
+                        onClick = { onLoadModel("/data/user/0/com.localllm.myapplication/cache/gemma-3n-E2B-it-int4.task") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Load Default Model (Cache)")
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Button(
+                        onClick = { onLoadModel("gemma-3n-E2B-it-int4.task") },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Load Model (Assets)")
+                    }
                 }
             }
             
@@ -387,8 +408,23 @@ fun ChatFeatureScreen(
             
             Spacer(modifier = Modifier.height(8.dp))
             
+            val context = LocalContext.current
+            val imagePickerLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.GetContent()
+            ) { uri ->
+                uri?.let { uriValue ->
+                    selectedImage = try {
+                        android.provider.MediaStore.Images.Media.getBitmap(
+                            context.contentResolver, uriValue
+                        )
+                    } catch (e: Exception) {
+                        null // Handle error by setting to null
+                    }
+                }
+            }
+            
             Button(
-                onClick = { /* TODO: Image picker */ },
+                onClick = { imagePickerLauncher.launch("image/*") },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !isProcessing
             ) {

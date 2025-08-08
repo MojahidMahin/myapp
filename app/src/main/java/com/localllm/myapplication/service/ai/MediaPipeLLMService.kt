@@ -8,6 +8,7 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MediaPipeLLMService(private val context: Context) {
     
@@ -23,6 +24,9 @@ class MediaPipeLLMService(private val context: Context) {
     private var llmInference: LlmInference? = null
     private var session: LlmInferenceSession? = null
     private var isInitialized = false
+    
+    // Simple cancellation flag - minimal change to avoid crashes
+    private val shouldStop = AtomicBoolean(false)
     
     suspend fun initialize(modelPath: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -74,6 +78,9 @@ class MediaPipeLLMService(private val context: Context) {
                 Log.d(TAG, "Including ${images.size} image(s)")
             }
             
+            // Reset stop flag for new generation
+            shouldStop.set(false)
+            
             val currentSession = session!!
             
             // Add text query first
@@ -102,9 +109,14 @@ class MediaPipeLLMService(private val context: Context) {
             
             currentSession.generateResponseAsync(resultListener)
             
-            // Wait for completion
-            while (!isComplete) {
+            // Wait for completion - keep original logic but add simple cancellation check
+            while (!isComplete && !shouldStop.get()) {
                 Thread.sleep(50)
+            }
+            
+            if (shouldStop.get()) {
+                Log.d(TAG, "Generation was stopped by user")
+                return@withContext Result.failure(Exception("Generation was cancelled"))
             }
             
             val finalResponse = responseBuilder.toString()
@@ -117,8 +129,27 @@ class MediaPipeLLMService(private val context: Context) {
         }
     }
     
+    /**
+     * Stop current generation
+     */
+    fun cancelGeneration() {
+        Log.d(TAG, "Cancelling current generation")
+        shouldStop.set(true)
+    }
+    
+    /**
+     * Check if generation is in progress
+     */
+    fun isGenerating(): Boolean {
+        return !shouldStop.get() && isInitialized
+    }
+    
     suspend fun resetSession(): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            // Stop any ongoing generation first
+            shouldStop.set(true)
+            Thread.sleep(100) // Give time for generation to stop
+            
             session?.close()
             
             val sessionOptions = LlmInferenceSession.LlmInferenceSessionOptions.builder()
@@ -133,6 +164,7 @@ class MediaPipeLLMService(private val context: Context) {
                 .build()
                 
             session = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
+            shouldStop.set(false)
             Log.d(TAG, "Session reset successfully")
             Result.success(Unit)
         } catch (e: Exception) {
@@ -143,6 +175,7 @@ class MediaPipeLLMService(private val context: Context) {
     
     fun cleanup() {
         try {
+            shouldStop.set(true)
             session?.close()
             llmInference?.close()
             session = null

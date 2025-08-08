@@ -13,18 +13,24 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.localllm.myapplication.data.ChatMessage
@@ -92,6 +98,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val chatSession by viewModel.chatSession
     val isModelLoading by viewModel.isModelLoading
     val isGeneratingResponse by viewModel.isGeneratingResponse
+    val canStopGeneration by viewModel.canStopGeneration
     val currentModelPath by viewModel.currentModelPath
     
     Log.d("ChatScreen", "State loaded - modelLoading: $isModelLoading, modelPath: $currentModelPath")
@@ -236,6 +243,19 @@ fun ChatScreen(viewModel: ChatViewModel) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Generating response...")
+                                Spacer(modifier = Modifier.width(8.dp))
+                                if (canStopGeneration) {
+                                    IconButton(
+                                        onClick = { viewModel.stopGeneration() },
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Close,
+                                            contentDescription = "Stop Generation",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -334,6 +354,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
 
 @Composable
 fun ChatMessageItem(message: ChatMessage) {
+    val clipboardManager = LocalClipboardManager.current
+    var showCopyIcon by remember { mutableStateOf(false) }
+    
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromUser) {
@@ -345,7 +368,19 @@ fun ChatMessageItem(message: ChatMessage) {
         Card(
             modifier = Modifier
                 .widthIn(max = 280.dp)
-                .padding(vertical = 2.dp),
+                .padding(vertical = 2.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = {
+                            showCopyIcon = true
+                        },
+                        onTap = {
+                            if (showCopyIcon) {
+                                showCopyIcon = false
+                            }
+                        }
+                    )
+                },
             colors = CardDefaults.cardColors(
                 containerColor = if (message.isFromUser) {
                     MaterialTheme.colorScheme.primary
@@ -369,15 +404,43 @@ fun ChatMessageItem(message: ChatMessage) {
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 
-                Text(
-                    text = message.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (message.isFromUser) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(
+                        text = message.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (message.isFromUser) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    
+                    if (showCopyIcon && message.text.isNotBlank()) {
+                        IconButton(
+                            onClick = {
+                                clipboardManager.setText(AnnotatedString(message.text))
+                                showCopyIcon = false
+                            },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Share,
+                                contentDescription = "Copy text",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (message.isFromUser) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
                     }
-                )
+                }
             }
         }
     }

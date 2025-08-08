@@ -10,10 +10,14 @@ import com.localllm.myapplication.command.ChatCommand
 import com.localllm.myapplication.data.ChatMessage
 import com.localllm.myapplication.data.ChatSession
 import com.localllm.myapplication.data.MessageType
-import com.localllm.myapplication.service.ai.MediaPipeLLMService
+import com.localllm.myapplication.service.ModelManager
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-class ChatViewModel(private val context: Context) : ViewModel() {
+class ChatViewModel(
+    private val context: Context,
+    private val modelManager: ModelManager
+) : ViewModel() {
 
     companion object {
         private const val TAG = "ChatViewModel"
@@ -24,60 +28,75 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     val isGeneratingResponse = mutableStateOf(false)
     val currentModelPath = mutableStateOf<String?>(null)
     val modelLoadError = mutableStateOf<String?>(null)
+    val canStopGeneration = mutableStateOf(false)
     
-    private val mediaPipeLLMService = MediaPipeLLMService(context)
-
-    fun loadModel(modelPath: String) {
-        isModelLoading.value = true
-        currentModelPath.value = modelPath
-        modelLoadError.value = null
-        
+    init {
+        // Observe model manager state
         viewModelScope.launch {
-            try {
-                Log.d(TAG, "Loading MediaPipe model: $modelPath")
-                
-                val result = mediaPipeLLMService.initialize(modelPath)
-                
-                result.fold(
-                    onSuccess = {
-                        Log.d(TAG, "MediaPipe model loaded successfully")
-                        isModelLoading.value = false
-                        modelLoadError.value = null
-                        chatSession.value = chatSession.value.copy(
-                            modelPath = modelPath,
-                            isModelLoaded = true
-                        )
-                        
-                        val successMessage = ChatMessage(
-                            text = "MediaPipe LLM model loaded successfully! You can now start chatting with image support.",
-                            isFromUser = false
-                        )
-                        addMessage(successMessage)
-                    },
-                    onFailure = { error ->
-                        Log.e(TAG, "Failed to load MediaPipe model", error)
-                        isModelLoading.value = false
-                        modelLoadError.value = error.message
-                        
-                        val errorMessage = ChatMessage(
-                            text = "Error loading MediaPipe model: ${error.message}",
-                            isFromUser = false
-                        )
-                        addMessage(errorMessage)
-                    }
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Exception during model loading", e)
-                isModelLoading.value = false
-                modelLoadError.value = e.message
-                
-                val errorMessage = ChatMessage(
-                    text = "Exception loading model: ${e.message}",
-                    isFromUser = false
-                )
-                addMessage(errorMessage)
+            modelManager.isModelLoaded.collectLatest { isLoaded ->
+                chatSession.value = chatSession.value.copy(isModelLoaded = isLoaded)
             }
         }
+        
+        viewModelScope.launch {
+            modelManager.isModelLoading.collectLatest { loading ->
+                isModelLoading.value = loading
+            }
+        }
+        
+        viewModelScope.launch {
+            modelManager.currentModelPath.collectLatest { path ->
+                currentModelPath.value = path
+            }
+        }
+        
+        viewModelScope.launch {
+            modelManager.modelLoadError.collectLatest { error ->
+                modelLoadError.value = error
+            }
+        }
+        
+        viewModelScope.launch {
+            modelManager.generationInProgress.collectLatest { generating ->
+                isGeneratingResponse.value = generating
+                canStopGeneration.value = generating
+            }
+        }
+    }
+
+    fun loadModel(modelPath: String) {
+        modelManager.loadModel(modelPath) { result ->
+            result.fold(
+                onSuccess = {
+                    Log.d(TAG, "Model loaded successfully")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to load model", error)
+                }
+            )
+        }
+    }
+    
+    fun stopGeneration() {
+        modelManager.stopGeneration()
+        canStopGeneration.value = false
+    }
+    
+    fun unloadModel() {
+        modelManager.unloadModel { result ->
+            result.fold(
+                onSuccess = {
+                    Log.d(TAG, "Model unloaded successfully")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to unload model", error)
+                }
+            )
+        }
+    }
+    
+    fun getAvailableModels(): List<String> {
+        return modelManager.getAvailableModels()
     }
 
     fun sendMessage(text: String, image: Bitmap? = null) {
@@ -93,7 +112,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         addMessage(userMessage)
         
         // Check if model is loaded
-        if (!mediaPipeLLMService.isModelLoaded()) {
+        if (!modelManager.isModelLoaded.value) {
             val errorMessage = ChatMessage(
                 text = "Please load a model first to start chatting.",
                 isFromUser = false
@@ -102,18 +121,17 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             return
         }
         
-        // Generate response using MediaPipe
+        // Generate response using ModelManager
         isGeneratingResponse.value = true
+        canStopGeneration.value = true
         
-        // Add loading message that gets updated with streaming response
         var currentResponseMessage: ChatMessage? = null
+        val images = if (image != null) listOf(image) else emptyList()
         
-        val chatCommand = ChatCommand(
-            mediaPipeLLMService = mediaPipeLLMService,
+        modelManager.generateResponse(
             prompt = text,
-            image = image,
-            onPartialResponse = { partialText ->
-                // Update the current response message with streaming text
+            images = images,
+            onPartialResult = { partialText ->
                 if (currentResponseMessage == null) {
                     currentResponseMessage = ChatMessage(
                         text = partialText,
@@ -124,26 +142,33 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 } else {
                     updateLastMessage(partialText)
                 }
-            },
-            onResponse = { responseMessage ->
-                // Final response received
-                if (currentResponseMessage == null) {
-                    addMessage(responseMessage)
-                }
-                isGeneratingResponse.value = false
-            },
-            onError = { error ->
-                Log.e(TAG, "MediaPipe chat command failed", error)
-                val errorMessage = ChatMessage(
-                    text = "Error generating response: ${error.message}",
-                    isFromUser = false
-                )
-                addMessage(errorMessage)
-                isGeneratingResponse.value = false
             }
-        )
-        
-        chatCommand.execute()
+        ) { result ->
+            result.fold(
+                onSuccess = { finalResponse ->
+                    if (currentResponseMessage == null) {
+                        val responseMessage = ChatMessage(
+                            text = finalResponse,
+                            isFromUser = false,
+                            messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
+                        )
+                        addMessage(responseMessage)
+                    }
+                    isGeneratingResponse.value = false
+                    canStopGeneration.value = false
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Chat generation failed", error)
+                    val errorMessage = ChatMessage(
+                        text = "Error generating response: ${error.message}",
+                        isFromUser = false
+                    )
+                    addMessage(errorMessage)
+                    isGeneratingResponse.value = false
+                    canStopGeneration.value = false
+                }
+            )
+        }
     }
 
     fun clearChat() {
@@ -152,20 +177,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         )
     }
 
-    fun unloadModel() {
-        mediaPipeLLMService.cleanup()
-        chatSession.value = chatSession.value.copy(
-            modelPath = null,
-            isModelLoaded = false
-        )
-        currentModelPath.value = null
-    }
-    
     fun resetSession() {
-        viewModelScope.launch {
-            mediaPipeLLMService.resetSession()
-            clearChat()
-        }
+        modelManager.resetSession()
+        clearChat()
     }
 
     private fun addMessage(message: ChatMessage) {
@@ -187,6 +201,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        mediaPipeLLMService.cleanup()
+        // ModelManager is singleton and handles its own cleanup
     }
 }

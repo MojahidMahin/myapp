@@ -16,10 +16,14 @@ import com.localllm.myapplication.data.ChatMessage
 import com.localllm.myapplication.data.MessageType
 import com.localllm.myapplication.data.PromptTemplate
 import com.localllm.myapplication.data.PromptTemplateFactory
-import com.localllm.myapplication.service.ai.MediaPipeLLMService
+import com.localllm.myapplication.service.ModelManager
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
-class AIGalleryViewModel(private val context: Context) : ViewModel() {
+class AIGalleryViewModel(
+    private val context: Context,
+    private val modelManager: ModelManager
+) : ViewModel() {
 
     companion object {
         private const val TAG = "AIGalleryViewModel"
@@ -55,57 +59,63 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
     val transcriptionMode = mutableStateOf(TranscriptionMode.TRANSCRIBE_ONLY)
     val transcriptionResults = mutableStateOf<List<String>>(emptyList())
     
-    private val mediaPipeLLMService = MediaPipeLLMService(context)
-
-    fun loadModel(modelPath: String) {
-        isModelLoading.value = true
-        currentModelPath.value = modelPath
-        modelLoadError.value = null
+    init {
+        // Observe model manager state
+        viewModelScope.launch {
+            modelManager.isModelLoaded.collectLatest { loaded ->
+                if (loaded && chatMessages.value.isEmpty()) {
+                    addChatMessage(
+                        ChatMessage(
+                            text = "Welcome to AI Gallery! Model is loaded and ready to use. Select a feature to begin.",
+                            isFromUser = false
+                        )
+                    )
+                } else if (!loaded && chatMessages.value.isEmpty()) {
+                    addChatMessage(
+                        ChatMessage(
+                            text = "Welcome to AI Gallery! Please load a model using the 'Load Model' button to start using AI features.",
+                            isFromUser = false
+                        )
+                    )
+                }
+            }
+        }
         
         viewModelScope.launch {
-            try {
-                Log.d(TAG, "Loading MediaPipe model: $modelPath")
-                
-                val result = mediaPipeLLMService.initialize(modelPath)
-                
-                result.fold(
-                    onSuccess = {
-                        Log.d(TAG, "MediaPipe model loaded successfully")
-                        isModelLoading.value = false
-                        modelLoadError.value = null
-                        
-                        addChatMessage(
-                            ChatMessage(
-                                text = "AI Gallery model loaded successfully! All features are now available.",
-                                isFromUser = false
-                            )
-                        )
-                    },
-                    onFailure = { error ->
-                        Log.e(TAG, "Failed to load MediaPipe model", error)
-                        isModelLoading.value = false
-                        modelLoadError.value = error.message
-                        
-                        addChatMessage(
-                            ChatMessage(
-                                text = "Error loading model: ${error.message}",
-                                isFromUser = false
-                            )
-                        )
-                    }
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Exception during model loading", e)
-                isModelLoading.value = false
-                modelLoadError.value = e.message
-                
-                addChatMessage(
-                    ChatMessage(
-                        text = "Exception loading model: ${e.message}",
-                        isFromUser = false
-                    )
-                )
+            modelManager.isModelLoading.collectLatest { loading ->
+                isModelLoading.value = loading
             }
+        }
+        
+        viewModelScope.launch {
+            modelManager.currentModelPath.collectLatest { path ->
+                currentModelPath.value = path
+            }
+        }
+        
+        viewModelScope.launch {
+            modelManager.modelLoadError.collectLatest { error ->
+                modelLoadError.value = error
+            }
+        }
+        
+        viewModelScope.launch {
+            modelManager.generationInProgress.collectLatest { processing ->
+                isProcessing.value = processing
+            }
+        }
+    }
+
+    fun loadModel(modelPath: String) {
+        modelManager.loadModel(modelPath) { result ->
+            result.fold(
+                onSuccess = {
+                    Log.d(TAG, "Model loaded successfully")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to load model", error)
+                }
+            )
         }
     }
 
@@ -113,10 +123,18 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
         selectedFeature.value = feature
         Log.d(TAG, "Selected feature: ${feature.label}")
     }
+    
+    fun goBackToFeatureSelection() {
+        selectedFeature.value = null
+    }
+    
+    fun stopGeneration() {
+        modelManager.stopGeneration()
+    }
 
     // Chat feature methods
     fun sendChatMessage(text: String, image: Bitmap? = null) {
-        if (text.isBlank() || !isModelLoaded()) return
+        if (text.isBlank() || !modelManager.isModelLoaded.value) return
         
         // Add user message
         addChatMessage(
@@ -128,68 +146,52 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
             )
         )
         
-        // Generate response using existing ChatCommand logic
+        // Generate response using ModelManager
         isProcessing.value = true
         
-        viewModelScope.launch {
-            try {
-                val images = if (image != null) listOf(image) else emptyList()
-                
-                var currentResponse = ""
-                var responseMessage: ChatMessage? = null
-                
-                val result = mediaPipeLLMService.generateResponse(
-                    prompt = text,
-                    images = images,
-                    onPartialResult = { partialText ->
-                        currentResponse = partialText
-                        if (responseMessage == null) {
-                            responseMessage = ChatMessage(
-                                text = partialText,
+        val images = if (image != null) listOf(image) else emptyList()
+        var responseMessage: ChatMessage? = null
+        
+        modelManager.generateResponse(
+            prompt = text,
+            images = images,
+            onPartialResult = { partialText ->
+                if (responseMessage == null) {
+                    responseMessage = ChatMessage(
+                        text = partialText,
+                        isFromUser = false,
+                        messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
+                    )
+                    addChatMessage(responseMessage!!)
+                } else {
+                    updateLastChatMessage(partialText)
+                }
+            }
+        ) { result ->
+            result.fold(
+                onSuccess = { finalResponse ->
+                    if (responseMessage == null) {
+                        addChatMessage(
+                            ChatMessage(
+                                text = finalResponse,
                                 isFromUser = false,
                                 messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
                             )
-                            addChatMessage(responseMessage!!)
-                        } else {
-                            updateLastChatMessage(partialText)
-                        }
-                    }
-                )
-                
-                result.fold(
-                    onSuccess = { finalResponse ->
-                        if (responseMessage == null) {
-                            addChatMessage(
-                                ChatMessage(
-                                    text = finalResponse,
-                                    isFromUser = false,
-                                    messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
-                                )
-                            )
-                        }
-                        isProcessing.value = false
-                    },
-                    onFailure = { error ->
-                        Log.e(TAG, "Chat failed", error)
-                        addChatMessage(
-                            ChatMessage(
-                                text = "Error: ${error.message}",
-                                isFromUser = false
-                            )
                         )
-                        isProcessing.value = false
                     }
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Chat exception", e)
-                addChatMessage(
-                    ChatMessage(
-                        text = "Error: ${e.message}",
-                        isFromUser = false
+                    isProcessing.value = false
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Chat failed", error)
+                    addChatMessage(
+                        ChatMessage(
+                            text = "Error: ${error.message}",
+                            isFromUser = false
+                        )
                     )
-                )
-                isProcessing.value = false
-            }
+                    isProcessing.value = false
+                }
+            )
         }
     }
 
@@ -210,29 +212,41 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
 
     fun executePromptTemplate(userInput: String) {
         val template = selectedTemplate.value ?: return
-        if (!isModelLoaded() || userInput.isBlank()) return
+        if (!modelManager.isModelLoaded.value || userInput.isBlank()) return
         
         isProcessing.value = true
         
-        val command = PromptLabCommand(
-            mediaPipeLLMService = mediaPipeLLMService,
-            promptTemplate = template,
-            userInput = userInput,
-            templateParameters = templateParameters.value,
-            onResult = { result ->
-                val currentResults = promptLabResults.value.toMutableList()
-                currentResults.add(0, result) // Add to beginning
-                promptLabResults.value = currentResults
-                isProcessing.value = false
-                Log.d(TAG, "Prompt lab result: ${result.response.take(100)}...")
-            },
-            onError = { error ->
-                Log.e(TAG, "Prompt lab failed", error)
-                isProcessing.value = false
-            }
-        )
+        val fullPrompt = template.buildPrompt(userInput, templateParameters.value)
+        val startTime = System.currentTimeMillis()
         
-        command.execute()
+        modelManager.generateResponse(
+            prompt = fullPrompt,
+            images = emptyList()
+        ) { result ->
+            result.fold(
+                onSuccess = { response ->
+                    val endTime = System.currentTimeMillis()
+                    val promptLabResult = PromptLabResult(
+                        template = template,
+                        userInput = userInput,
+                        fullPrompt = fullPrompt,
+                        response = response,
+                        latencyMs = endTime - startTime,
+                        parameters = templateParameters.value
+                    )
+                    
+                    val currentResults = promptLabResults.value.toMutableList()
+                    currentResults.add(0, promptLabResult)
+                    promptLabResults.value = currentResults
+                    isProcessing.value = false
+                    Log.d(TAG, "Prompt lab result: ${response.take(100)}...")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Prompt lab failed", error)
+                    isProcessing.value = false
+                }
+            )
+        }
     }
 
     // Audio transcription methods
@@ -241,28 +255,34 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
     }
 
     fun transcribeAudio(audioData: ByteArray) {
-        if (!isModelLoaded()) return
+        if (!modelManager.isModelLoaded.value) return
         
         isProcessing.value = true
         
-        val command = AudioTranscriptionCommand(
-            mediaPipeLLMService = mediaPipeLLMService,
-            audioData = audioData,
-            transcriptionMode = transcriptionMode.value,
-            onResult = { transcription ->
-                val currentResults = transcriptionResults.value.toMutableList()
-                currentResults.add(0, transcription) // Add to beginning
-                transcriptionResults.value = currentResults
-                isProcessing.value = false
-                Log.d(TAG, "Audio transcription result: ${transcription.take(100)}...")
-            },
-            onError = { error ->
-                Log.e(TAG, "Audio transcription failed", error)
-                isProcessing.value = false
-            }
-        )
+        val prompt = when (transcriptionMode.value) {
+            TranscriptionMode.TRANSCRIBE_ONLY -> "Please transcribe the following audio:"
+            TranscriptionMode.TRANSCRIBE_AND_TRANSLATE -> "Please transcribe and translate the following audio to English:"
+            TranscriptionMode.SUMMARIZE -> "Please transcribe the following audio and provide a brief summary:"
+        }
         
-        command.execute()
+        modelManager.generateResponse(
+            prompt = prompt,
+            images = emptyList()
+        ) { result ->
+            result.fold(
+                onSuccess = { transcription ->
+                    val currentResults = transcriptionResults.value.toMutableList()
+                    currentResults.add(0, transcription)
+                    transcriptionResults.value = currentResults
+                    isProcessing.value = false
+                    Log.d(TAG, "Audio transcription result: ${transcription.take(100)}...")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Audio transcription failed", error)
+                    isProcessing.value = false
+                }
+            )
+        }
     }
 
     // Utility methods
@@ -279,24 +299,19 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
     }
 
     fun resetSession() {
-        viewModelScope.launch {
-            mediaPipeLLMService.resetSession()
-            clearChatHistory()
-            clearPromptLabResults()
-            clearTranscriptionResults()
-        }
+        modelManager.resetSession()
+        clearChatHistory()
+        clearPromptLabResults()
+        clearTranscriptionResults()
     }
 
     fun unloadModel() {
-        mediaPipeLLMService.cleanup()
-        currentModelPath.value = null
+        modelManager.unloadModel()
         clearChatHistory()
         clearPromptLabResults() 
         clearTranscriptionResults()
         selectedFeature.value = null
     }
-
-    private fun isModelLoaded(): Boolean = mediaPipeLLMService.isModelLoaded()
 
     private fun addChatMessage(message: ChatMessage) {
         val currentMessages = chatMessages.value.toMutableList()
@@ -317,6 +332,6 @@ class AIGalleryViewModel(private val context: Context) : ViewModel() {
 
     override fun onCleared() {
         super.onCleared()
-        mediaPipeLLMService.cleanup()
+        // ModelManager is singleton and handles its own cleanup
     }
 }
