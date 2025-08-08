@@ -9,6 +9,7 @@ import com.localllm.myapplication.command.LoadModelCommand
 import com.localllm.myapplication.data.ChatMessage
 import com.localllm.myapplication.data.ChatSession
 import com.localllm.myapplication.data.LLMRepository
+import com.localllm.myapplication.data.HybridLLMRepository
 import com.localllm.myapplication.data.MessageType
 
 class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
@@ -39,9 +40,15 @@ class ChatViewModel(private val llmRepository: LLMRepository) : ViewModel() {
                     modelPath = modelPath,
                     isModelLoaded = true
                 )
-                // Add success message to chat
+                // Add success message to chat with repository info
+                val repositoryType = if (llmRepository is HybridLLMRepository) {
+                    llmRepository.getCurrentRepositoryType()
+                } else {
+                    "MediaPipe"
+                }
+                
                 val successMessage = ChatMessage(
-                    text = "Model loaded successfully! You can now start chatting.",
+                    text = "Model loaded successfully using $repositoryType! You can now start chatting.",
                     isFromUser = false
                 )
                 addMessage(successMessage)
