@@ -2,8 +2,6 @@ package com.localllm.myapplication.ui.screen
 
 import android.graphics.Bitmap
 import android.net.Uri
-import android.provider.DocumentsContract
-import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,58 +36,6 @@ import com.localllm.myapplication.ui.viewmodel.ChatViewModel
 import com.localllm.myapplication.ui.AIAnalysisActivity
 import java.io.File
 
-// Helper functions for file handling
-private fun getRealPathFromUri(context: android.content.Context, uri: Uri): String? {
-    return try {
-        when {
-            DocumentsContract.isDocumentUri(context, uri) -> {
-                // For document URIs, try to copy to cache first
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val fileName = getFileName(context, uri) ?: "model.task"
-                    val cacheFile = File(context.cacheDir, fileName)
-                    cacheFile.outputStream().use { output ->
-                        inputStream.copyTo(output)
-                    }
-                    inputStream.close()
-                    Log.d("ChatScreen", "Copied model to cache: ${cacheFile.absolutePath}")
-                    cacheFile.absolutePath
-                } else null
-            }
-            uri.scheme == "file" -> uri.path
-            else -> {
-                // Last resort: copy to cache
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val cacheFile = File(context.cacheDir, "temp_model.task")
-                    cacheFile.outputStream().use { output ->
-                        inputStream.copyTo(output)
-                    }
-                    inputStream.close()
-                    cacheFile.absolutePath
-                } else null
-            }
-        }
-    } catch (e: Exception) {
-        Log.e("ChatScreen", "Error resolving file path", e)
-        null
-    }
-}
-
-// Helper to get filename from URI
-private fun getFileName(context: android.content.Context, uri: Uri): String? {
-    return try {
-        val cursor = context.contentResolver.query(uri, null, null, null, null)
-        cursor?.use {
-            if (it.moveToFirst()) {
-                val nameIndex = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex >= 0) it.getString(nameIndex) else null
-            } else null
-        }
-    } catch (e: Exception) {
-        null
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -110,26 +56,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
     
-    // File picker for model
-    val modelPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri ->
-        uri?.let {
-            Log.d("ChatScreen", "Selected file URI: $uri")
-            
-            // Try to get the real file path
-            val path = getRealPathFromUri(context, uri)
-            Log.d("ChatScreen", "Resolved file path: $path")
-            
-            if (path != null && (path.endsWith(".task") || path.endsWith(".tflite"))) {
-                Log.d("ChatScreen", "Loading model from: $path")
-                viewModel.loadModel(path)
-            } else {
-                Log.e("ChatScreen", "Invalid file selected or path resolution failed. Path: $path")
-                // Show error message to user
-            }
-        }
-    }
     
     // Image picker
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -196,19 +122,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     Icon(Icons.Default.Settings, contentDescription = "AI Analysis")
                 }
                 
-                Button(
-                    onClick = { 
-                        Log.d("ChatScreen", "Model picker button clicked")
-                        modelPickerLauncher.launch("*/*") 
-                    },
-                    enabled = !isModelLoading
-                ) {
-                    if (isModelLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                    } else {
-                        Text("Load Model")
-                    }
-                }
             }
         )
         

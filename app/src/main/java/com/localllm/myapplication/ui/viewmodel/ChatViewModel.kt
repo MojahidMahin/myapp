@@ -64,8 +64,10 @@ class ChatViewModel(
         
         viewModelScope.launch {
             modelManager.generationInProgress.collectLatest { generating ->
+                Log.d(TAG, "Generation progress state changed: $generating")
                 isGeneratingResponse.value = generating
                 canStopGeneration.value = generating
+                Log.d(TAG, "canStopGeneration updated to: $generating")
             }
         }
         
@@ -93,8 +95,10 @@ class ChatViewModel(
     }
     
     fun stopGeneration() {
+        Log.d(TAG, "Stop generation button clicked")
         modelManager.stopGeneration()
         canStopGeneration.value = false
+        Log.d(TAG, "canStopGeneration set to false")
     }
     
     fun unloadModel() {

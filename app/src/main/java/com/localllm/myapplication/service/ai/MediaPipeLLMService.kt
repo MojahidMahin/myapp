@@ -40,6 +40,12 @@ class MediaPipeLLMService(private val context: Context) {
                 .setMaxTokens(MAX_TOKENS)
                 .setPreferredBackend(LlmInference.Backend.GPU)
                 .setMaxNumImages(MAX_IMAGE_COUNT)
+                // Temporarily disable graph options
+                // .setGraphOptions(
+                //     com.google.mediapipe.tasks.genai.llminference.GraphOptions.builder()
+                //         .setEnableVisionModality(true)
+                //         .build()
+                // )
                 .build()
                 
             llmInference = LlmInference.createFromOptions(context, options)
@@ -48,11 +54,12 @@ class MediaPipeLLMService(private val context: Context) {
                 .setTopK(DEFAULT_TOP_K)
                 .setTopP(DEFAULT_TOP_P)
                 .setTemperature(DEFAULT_TEMPERATURE)
-                .setGraphOptions(
-                    com.google.mediapipe.tasks.genai.llminference.GraphOptions.builder()
-                        .setEnableVisionModality(true)
-                        .build()
-                )
+                // Temporarily disable graph options
+                // .setGraphOptions(
+                //     com.google.mediapipe.tasks.genai.llminference.GraphOptions.builder()
+                //         .setEnableVisionModality(true)
+                //         .build()
+                // )
                 .build()
                 
             session = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
@@ -167,11 +174,12 @@ class MediaPipeLLMService(private val context: Context) {
                 .setTopK(DEFAULT_TOP_K)
                 .setTopP(DEFAULT_TOP_P)
                 .setTemperature(DEFAULT_TEMPERATURE)
-                .setGraphOptions(
-                    com.google.mediapipe.tasks.genai.llminference.GraphOptions.builder()
-                        .setEnableVisionModality(true)
-                        .build()
-                )
+                // Temporarily disable graph options
+                // .setGraphOptions(
+                //     com.google.mediapipe.tasks.genai.llminference.GraphOptions.builder()
+                //         .setEnableVisionModality(true)
+                //         .build()
+                // )
                 .build()
                 
             session = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)

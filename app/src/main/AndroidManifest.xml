@@ -5,6 +5,8 @@
     <!-- Background Service Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -99,6 +101,27 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name=".service.fcm.BackgroundFCMService"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".service.workflow.WorkflowPersistenceService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- WorkManager System Foreground Service -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync|specialUse"
+            tools:node="merge" />
+
         <activity
             android:name=".ui.ChatActivity"
             android:exported="false"
@@ -116,6 +139,13 @@
             android:exported="false"
             android:label="AI Analysis Center"
             android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".ui.WorkflowManagerActivity"
+            android:exported="false"
+            android:label="Workflow Manager"
+            android:theme="@style/Theme.MyApplication" />
+
     </application>
 
 </manifest>

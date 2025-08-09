@@ -40,7 +40,12 @@ class UnloadModelCommand(
     }
     
     override fun canExecute(): Boolean {
-        return modelService.isModelLoaded()
+        val serviceLoaded = modelService.isModelLoaded()
+        android.util.Log.d("UnloadModelCommand", "modelService.isModelLoaded() = $serviceLoaded")
+        // Allow unloading even if service thinks model isn't loaded
+        // This handles state synchronization issues between UI and service
+        android.util.Log.d("UnloadModelCommand", "Allowing unload command execution")
+        return true
     }
     
     override fun getDescription(): String = "Unload current model"

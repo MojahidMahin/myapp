@@ -48,7 +48,6 @@ class ModelManager private constructor(private val context: Context) {
     
     // Following Dependency Inversion Principle - depend on abstractions
     private val stateRepository: ModelStateRepository = ModelStateRepositoryImpl(context)
-    private val workflowRepository: com.localllm.myapplication.data.WorkflowRepository = com.localllm.myapplication.data.InMemoryWorkflowRepository()
     private val modelService: ModelService = ModelServiceImpl(context, stateRepository)
     private val commandInvoker: ModelCommandInvoker = ModelCommandInvoker()
     private val serviceCommandInvoker: ServiceCommandInvoker = ServiceCommandInvoker()
@@ -1089,6 +1088,228 @@ class ModelManager private constructor(private val context: Context) {
      */
     fun getBackgroundTaskScheduler(): BackgroundTaskScheduler = backgroundTaskScheduler
     
+    // ========== WORKFLOW MANAGEMENT METHODS ==========
+    
+    /**
+     * Create a new workflow
+     * Following Single Responsibility and Command Pattern
+     */
+    fun createWorkflow(workflow: Workflow, onResult: ((Result<Unit>) -> Unit)? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val result = workflowRepository.saveWorkflow(workflow)
+                scope.launch(Dispatchers.Main) {
+                    result.fold(
+                        onSuccess = {
+                            // Enable background service if workflow runs in background
+                            if (workflow.runInBackground && !isPersistentModeEnabled) {
+                                enablePersistentMode()
+                            }
+                            Log.d(TAG, "Workflow created: ${workflow.name}")
+                            onResult?.invoke(Result.success(Unit))
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Failed to create workflow: ${workflow.name}", error)
+                            onResult?.invoke(Result.failure(error))
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.failure(e))
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update an existing workflow
+     * Following Single Responsibility and Command Pattern
+     */
+    fun updateWorkflow(workflow: Workflow, onResult: ((Result<Unit>) -> Unit)? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val result = workflowRepository.updateWorkflow(workflow)
+                scope.launch(Dispatchers.Main) {
+                    result.fold(
+                        onSuccess = {
+                            Log.d(TAG, "Workflow updated: ${workflow.name}")
+                            onResult?.invoke(Result.success(Unit))
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Failed to update workflow: ${workflow.name}", error)
+                            onResult?.invoke(Result.failure(error))
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.failure(e))
+                }
+            }
+        }
+    }
+    
+    /**
+     * Delete a workflow
+     * Following Single Responsibility and Command Pattern
+     */
+    fun deleteWorkflow(workflowId: String, onResult: ((Result<Unit>) -> Unit)? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val result = workflowRepository.deleteWorkflow(workflowId)
+                scope.launch(Dispatchers.Main) {
+                    result.fold(
+                        onSuccess = {
+                            Log.d(TAG, "Workflow deleted: $workflowId")
+                            onResult?.invoke(Result.success(Unit))
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Failed to delete workflow: $workflowId", error)
+                            onResult?.invoke(Result.failure(error))
+                        }
+                    )
+                }
+            } catch (e: Exception) {
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.failure(e))
+                }
+            }
+        }
+    }
+    
+    /**
+     * Get a workflow by ID
+     * Following Single Responsibility and Command Pattern
+     */
+    fun getWorkflow(workflowId: String, onResult: ((Result<Workflow?>) -> Unit)? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val result = workflowRepository.getWorkflow(workflowId)
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(result)
+                }
+            } catch (e: Exception) {
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.failure(e))
+                }
+            }
+        }
+    }
+    
+    /**
+     * Get all workflows
+     * Following Single Responsibility and Command Pattern
+     */
+    fun getAllWorkflows(onResult: ((Result<List<Workflow>>) -> Unit)? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val result = workflowRepository.getAllWorkflows()
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(result)
+                }
+            } catch (e: Exception) {
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.failure(e))
+                }
+            }
+        }
+    }
+    
+    /**
+     * Get enabled workflows only
+     * Following Single Responsibility and Command Pattern
+     */
+    fun getEnabledWorkflows(onResult: ((Result<List<Workflow>>) -> Unit)? = null) {
+        // Simple stub implementation
+        onResult?.invoke(Result.success(emptyList()))
+    }
+    
+    /**
+     * Execute a workflow by ID
+     * Following Single Responsibility and Command Pattern
+     */
+    fun executeWorkflow(
+        workflowId: String, 
+        context: Map<String, Any> = emptyMap(),
+        onResult: ((Result<WorkflowResult>) -> Unit)? = null
+    ) {
+        // Simple stub implementation
+        val result = WorkflowResult(
+            workflowId = workflowId,
+            success = true,
+            message = "Workflow executed successfully (stub)",
+            executionTime = 100
+        )
+        onResult?.invoke(Result.success(result))
+    }
+    
+    /**
+     * Toggle workflow enabled/disabled state
+     * Following Single Responsibility and Command Pattern
+     */
+    fun toggleWorkflow(workflowId: String, enabled: Boolean, onResult: ((Result<Unit>) -> Unit)? = null) {
+        Log.d(TAG, "Toggle workflow stub: $workflowId, enabled: $enabled")
+        onResult?.invoke(Result.success(Unit))
+    }
+    
+    /**
+     * Execute a single workflow action
+     * Following Single Responsibility and Command Pattern
+     */
+    fun executeAction(
+        action: WorkflowAction,
+        context: Map<String, Any> = emptyMap(),
+        onResult: ((Result<String>) -> Unit)? = null
+    ) {
+        Log.d(TAG, "Execute action stub: ${action.name}")
+        onResult?.invoke(Result.success("Action executed successfully (stub)"))
+    }
+    
+    /**
+     * Save service connection
+     * Following Single Responsibility and Command Pattern
+     */
+    fun saveServiceConnection(connection: WorkflowServiceConnection, onResult: ((Result<Unit>) -> Unit)? = null) {
+        Log.d(TAG, "Save service connection stub: ${connection.id}")
+        onResult?.invoke(Result.success(Unit))
+    }
+    
+    /**
+     * Get service connections by type
+     * Following Single Responsibility and Command Pattern
+     */
+    fun getServiceConnectionsByType(
+        serviceType: ServiceType,
+        onResult: ((Result<List<WorkflowServiceConnection>>) -> Unit)? = null
+    ) {
+        Log.d(TAG, "Get service connections by type stub: $serviceType")
+        onResult?.invoke(Result.success(emptyList()))
+    }
+    
+    /**
+     * Get workflow execution history
+     * Following Single Responsibility and Command Pattern
+     */
+    fun getWorkflowExecutions(
+        workflowId: String,
+        limit: Int = 50,
+        onResult: ((Result<List<WorkflowExecution>>) -> Unit)? = null
+    ) {
+        Log.d(TAG, "Get workflow executions stub: $workflowId")
+        onResult?.invoke(Result.success(emptyList()))
+    }
+    
+    /**
+     * Get workflow repository for direct access
+     */
+    fun getWorkflowRepository(): WorkflowRepository = workflowRepository
+    
+    /**
+     * Get workflow executor for direct access
+     */
+    fun getWorkflowExecutor(): WorkflowExecutor = workflowExecutor
+    
     fun cleanup() {
         // Note: Don't disable persistent mode on cleanup - let it run in background
         // Only unbind from service connection
@@ -1096,21 +1317,227 @@ class ModelManager private constructor(private val context: Context) {
         
         // Clean up local resources
         commandInvoker.cleanup()
-        backgroundCommandInvoker.cleanup()
-        chatCommandInvoker.cleanup()
         serviceCommandInvoker.cleanup()
-        
-        // Cancel scope to clean up coroutines
+        chatCommandInvoker.cleanup()
+        backgroundCommandInvoker.cleanup()
+        workflowCommandInvoker.cleanup()
+        scope.launch { workflowExecutor.cleanup() }
         scope.cancel()
-        Log.d(TAG, "ModelManager cleanup completed")
     }
     
     /**
-     * Set up app-wide memory management
+     * Force cleanup including stopping persistent mode
+     * Call this only when truly shutting down the app permanently
+     */
+    fun forceCleanup() {
+        disablePersistentMode()
+        unloadModel()
+        backgroundTaskScheduler.cleanup()
+        commandInvoker.cleanup()
+        serviceCommandInvoker.cleanup()
+        chatCommandInvoker.cleanup()
+        backgroundCommandInvoker.cleanup()
+        workflowCommandInvoker.cleanup()
+        scope.launch { workflowExecutor.cleanup() }
+        scope.cancel()
+    }
+    
+    // ========== MEMORY MANAGEMENT ==========
+    
+    /**
+     * Set up application-wide memory management
      */
     private fun setupAppMemoryManagement() {
-        // This will be called when app is low on memory
-        // For now, just log - can be extended later
-        Log.d(TAG, "Memory management initialized")
+        // Set up system memory monitoring
+        val systemMemoryMonitor = Thread {
+            try {
+                while (true) {
+                    Thread.sleep(60000) // Check every minute
+                    
+                    checkSystemMemoryPressure()
+                }
+            } catch (e: InterruptedException) {
+                Log.d(TAG, "System memory monitor interrupted")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in system memory monitoring", e)
+            }
+        }
+        
+        systemMemoryMonitor.isDaemon = true
+        systemMemoryMonitor.name = "ModelManager-MemoryMonitor"
+        systemMemoryMonitor.start()
+        
+        Log.d(TAG, "App-wide memory management initialized")
+    }
+    
+    /**
+     * Check for system memory pressure and take preventive actions
+     */
+    private fun checkSystemMemoryPressure() {
+        try {
+            val runtime = Runtime.getRuntime()
+            val totalMemory = runtime.totalMemory() / (1024 * 1024)
+            val freeMemory = runtime.freeMemory() / (1024 * 1024)
+            val maxMemory = runtime.maxMemory() / (1024 * 1024)
+            val usedMemory = totalMemory - freeMemory
+            val availableMemory = maxMemory - usedMemory
+            
+            val memoryUsagePercentage = (usedMemory.toFloat() / maxMemory.toFloat()) * 100
+            
+            Log.d(TAG, "Memory status: ${usedMemory}MB used, ${availableMemory}MB available, ${memoryUsagePercentage.toInt()}% usage")
+            
+            // Check if we're using more than 85% of available memory
+            if (memoryUsagePercentage > 85.0f) {
+                Log.w(TAG, "High memory usage detected: ${memoryUsagePercentage.toInt()}%. Taking preventive action.")
+                
+                // First try gentle cleanup
+                performSystemMemoryCleanup()
+                
+                // Wait a moment and check again
+                Thread.sleep(2000)
+                val newFreeMemory = Runtime.getRuntime().freeMemory() / (1024 * 1024)
+                val newUsedMemory = Runtime.getRuntime().totalMemory() / (1024 * 1024) - newFreeMemory
+                val newMemoryUsagePercentage = (newUsedMemory.toFloat() / maxMemory.toFloat()) * 100
+                
+                Log.d(TAG, "Memory after cleanup: ${newMemoryUsagePercentage.toInt()}% usage")
+                
+                // If still high, consider model unload
+                if (newMemoryUsagePercentage > 90.0f && isModelLoaded.value) {
+                    Log.w(TAG, "Critical memory situation: ${newMemoryUsagePercentage.toInt()}%. Initiating emergency model unload.")
+                    
+                    scope.launch {
+                        unloadModel { result ->
+                            result.fold(
+                                onSuccess = {
+                                    Log.w(TAG, "Emergency model unload completed due to memory pressure")
+                                    
+                                    // Show user notification about memory-induced unload
+                                    try {
+                                        val toast = android.widget.Toast.makeText(
+                                            context,
+                                            "⚠️ Model automatically unloaded due to low memory. You can reload it when needed.",
+                                            android.widget.Toast.LENGTH_LONG
+                                        )
+                                        toast.show()
+                                    } catch (e: Exception) {
+                                        Log.w(TAG, "Could not show memory unload notification", e)
+                                    }
+                                },
+                                onFailure = { error ->
+                                    Log.e(TAG, "Emergency model unload failed", error)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking system memory pressure", e)
+        }
+    }
+    
+    /**
+     * Perform system-wide memory cleanup
+     */
+    private fun performSystemMemoryCleanup() {
+        try {
+            Log.d(TAG, "Performing system memory cleanup")
+            
+            // Multiple GC cycles with delays
+            for (i in 0..3) {
+                System.gc()
+                System.runFinalization()
+                Thread.sleep(300)
+            }
+            
+            // Clear any cached data that might be holding memory
+            scope.launch {
+                try {
+                    // Clear completed background tasks
+                    backgroundTaskScheduler.clearCompletedTasks()
+                    
+                    // Clear command history to free memory
+                    commandInvoker.clearHistory()
+                    serviceCommandInvoker.clearHistory()
+                    chatCommandInvoker.clearHistory()
+                    backgroundCommandInvoker.clearHistory()
+                    workflowCommandInvoker.clearHistory()
+                    
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error during cache cleanup", e)
+                }
+            }
+            
+            Log.d(TAG, "System memory cleanup completed")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during system memory cleanup", e)
+        }
+    }
+    
+    /**
+     * Get current memory usage information
+     */
+    fun getMemoryInfo(): Map<String, Any> {
+        val runtime = Runtime.getRuntime()
+        val totalMemory = runtime.totalMemory() / (1024 * 1024)
+        val freeMemory = runtime.freeMemory() / (1024 * 1024)
+        val maxMemory = runtime.maxMemory() / (1024 * 1024)
+        val usedMemory = totalMemory - freeMemory
+        val availableMemory = maxMemory - usedMemory
+        val memoryUsagePercentage = (usedMemory.toFloat() / maxMemory.toFloat()) * 100
+        
+        return mapOf(
+            "totalMemory" to totalMemory,
+            "freeMemory" to freeMemory,
+            "maxMemory" to maxMemory,
+            "usedMemory" to usedMemory,
+            "availableMemory" to availableMemory,
+            "usagePercentage" to memoryUsagePercentage.toInt()
+        )
+    }
+    
+    /**
+     * Check if system memory is critically low
+     */
+    fun isSystemMemoryCritical(): Boolean {
+        val runtime = Runtime.getRuntime()
+        val maxMemory = runtime.maxMemory() / (1024 * 1024)
+        val usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
+        val memoryUsagePercentage = (usedMemory.toFloat() / maxMemory.toFloat()) * 100
+        return memoryUsagePercentage > 90.0f
+    }
+    
+    /**
+     * Force immediate memory cleanup
+     */
+    fun forceMemoryCleanup(onResult: ((Result<String>) -> Unit)? = null) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val beforeMemory = getMemoryInfo()
+                Log.d(TAG, "Memory before cleanup: ${beforeMemory["usagePercentage"]}% used")
+                
+                performSystemMemoryCleanup()
+                
+                // Wait for cleanup to take effect
+                kotlinx.coroutines.delay(2000)
+                
+                val afterMemory = getMemoryInfo()
+                Log.d(TAG, "Memory after cleanup: ${afterMemory["usagePercentage"]}% used")
+                
+                val message = "Memory cleanup completed. Usage: ${beforeMemory["usagePercentage"]}% → ${afterMemory["usagePercentage"]}%"
+                
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.success(message))
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during force memory cleanup", e)
+                scope.launch(Dispatchers.Main) {
+                    onResult?.invoke(Result.failure(e))
+                }
+            }
+        }
     }
 }

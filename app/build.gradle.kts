@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    // kotlin("kapt") // Temporarily disabled
 }
 
 android {
@@ -42,6 +43,21 @@ android {
     lint {
         abortOnError = false
     }
+    
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/LICENSE"
+            excludes += "META-INF/LICENSE.txt"
+            excludes += "META-INF/license.txt"
+            excludes += "META-INF/NOTICE"
+            excludes += "META-INF/NOTICE.txt"
+            excludes += "META-INF/notice.txt"
+            excludes += "META-INF/ASL2.0"
+            excludes += "META-INF/*.kotlin_module"
+        }
+    }
 }
 
 dependencies {
@@ -77,6 +93,12 @@ dependencies {
     // Additional MediaPipe for comprehensive AI features
     implementation("com.google.mediapipe:tasks-text:0.10.15")
     
+    // WorkManager for background processing
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    
+    // FCM for push notifications
+    implementation("com.google.firebase:firebase-messaging-ktx:23.4.1")
+    
     // Image handling
     implementation("io.coil-kt:coil-compose:2.6.0")
     
@@ -92,5 +114,37 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.2")
     
+    // Navigation Compose
+    implementation("androidx.navigation:navigation-compose:2.8.5")
+    
+    // Gmail API integration
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
+    implementation("com.google.apis:google-api-services-gmail:v1-rev20220404-2.0.0")
+    implementation("com.google.api-client:google-api-client-android:2.2.0")
+    implementation("com.google.http-client:google-http-client-android:1.43.3")
+    implementation("com.google.http-client:google-http-client-gson:1.43.3")
+    implementation("com.google.api-client:google-api-client-gson:2.2.0")
+    
+    // HTTP client for Telegram Bot API
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    
+    // JSON handling for API responses
+    implementation("org.json:json:20230618")
+    
     // Note: activity-result is included in activity-compose, no separate dependency needed
+    
+    // Room database
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    // kapt("androidx.room:room-compiler:2.6.1") // Temporarily disabled
+    
+    // JavaMail for Gmail integration  
+    implementation("javax.mail:mail:1.4.7")
+    
+    // OkHttp for Telegram API
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    
+    // JSON parsing
+    implementation("org.json:json:20240303")
 }

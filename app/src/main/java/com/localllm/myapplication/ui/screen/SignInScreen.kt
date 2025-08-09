@@ -20,7 +20,10 @@ import com.localllm.myapplication.command.BackgroundWorkCommand
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.ui.ChatActivity
 import com.localllm.myapplication.ui.AIGalleryActivity
+// import com.localllm.myapplication.ui.WorkflowManagerActivity
 import com.localllm.myapplication.ui.viewmodel.AuthViewModel
+// import com.localllm.myapplication.ui.viewmodel.WorkflowViewModel
+// import com.localllm.myapplication.service.workflow.WorkflowPersistenceService
 
 @Composable
 fun SignInScreen(viewModel: AuthViewModel) {
@@ -30,6 +33,46 @@ fun SignInScreen(viewModel: AuthViewModel) {
     val backgroundServiceManager = remember { AppContainer.provideBackgroundServiceManager(context) }
     val permissionManager = remember { AppContainer.providePermissionManager(context as androidx.activity.ComponentActivity) }
     val modelManager = remember { AppContainer.provideModelManager(context) }
+    
+    // Workflow management - only initialize after sign-in (temporarily disabled)
+    // val workflowViewModel = remember { 
+    //     if (isSignedIn) WorkflowViewModel(modelManager) else null 
+    // }
+    
+    // Initialize workflow automation after successful sign-in (temporarily disabled)
+    // LaunchedEffect(isSignedIn) {
+    //     if (isSignedIn) {
+    //         Log.d("SignInScreen", "User signed in - initializing workflow automation")
+    //         
+    //         // Start workflow persistence service
+    //         try {
+    //             val intent = Intent(context, WorkflowPersistenceService::class.java)
+    //             context.startForegroundService(intent)
+    //             Log.d("SignInScreen", "Workflow automation service started")
+    //             
+    //             // Show welcome message with automation info
+    //             android.widget.Toast.makeText(
+    //                 context,
+    //                 "✅ Signed in! Workflow automation is now active.",
+    //                 android.widget.Toast.LENGTH_LONG
+    //             ).show()
+    //             
+    //         } catch (e: Exception) {
+    //             Log.e("SignInScreen", "Failed to start workflow service", e)
+    //         }
+    //     } else {
+    //         Log.d("SignInScreen", "User signed out - stopping workflow automation")
+    //         
+    //         // Stop workflow persistence service when signing out
+    //         try {
+    //             val intent = Intent(context, WorkflowPersistenceService::class.java)
+    //             context.stopService(intent)
+    //             Log.d("SignInScreen", "Workflow automation service stopped")
+    //         } catch (e: Exception) {
+    //             Log.e("SignInScreen", "Failed to stop workflow service", e)
+    //         }
+    //     }
+    // }
     
     // Model state
     val isModelLoaded by modelManager.isModelLoaded.collectAsState()
@@ -165,22 +208,44 @@ fun SignInScreen(viewModel: AuthViewModel) {
                     } else {
                         Button(
                             onClick = {
+                                Log.d("SignInScreen", "Unload button clicked, isModelLoaded: $isModelLoaded")
                                 if (isModelLoaded) {
+                                    Log.d("SignInScreen", "Calling modelManager.unloadModel()")
                                     modelManager.unloadModel { result ->
                                         result.fold(
                                             onSuccess = {
                                                 Log.d("SignInScreen", "Model unloaded successfully")
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "✅ Model unloaded successfully",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
                                             },
                                             onFailure = { error ->
                                                 Log.e("SignInScreen", "Failed to unload model", error)
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "❌ Failed to unload model: ${error.message}",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
                                             }
                                         )
                                     }
                                 } else {
                                     // Launch file picker to select model from device storage
-                                    Log.d("SignInScreen", "Launching model file picker")
-                                    // Filter for common model file types
-                                    modelFilePickerLauncher.launch("application/*")
+                                    Log.d("SignInScreen", "Launching model file picker, current state - isModelLoaded: $isModelLoaded, modelPath: $currentModelPath")
+                                    try {
+                                        // Filter for common model file types
+                                        modelFilePickerLauncher.launch("application/*")
+                                        Log.d("SignInScreen", "File picker launched successfully")
+                                    } catch (e: Exception) {
+                                        Log.e("SignInScreen", "Failed to launch file picker", e)
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "Failed to open file picker: ${e.message}",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
+                                    }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -408,6 +473,107 @@ fun SignInScreen(viewModel: AuthViewModel) {
                     Text("Request All Permissions")
                 }
                 
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Background processing test section
+                Text(
+                    text = "Background Processing Tests",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                
+                // Test background chat task
+                Button(
+                    onClick = {
+                        Log.d("UI", "Schedule background chat task clicked")
+                        modelManager.scheduleBackgroundChatTask(
+                            prompt = "Write a short poem about artificial intelligence",
+                            priority = com.localllm.myapplication.data.Priority.NORMAL
+                        ) { result ->
+                            result.fold(
+                                onSuccess = { message ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Background task scheduled: $message",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                },
+                                onFailure = { error ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Failed to schedule: ${error.message}",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("📝 Schedule Background Chat")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Test timed task
+                Button(
+                    onClick = {
+                        Log.d("UI", "Schedule timed task clicked")
+                        val futureTime = System.currentTimeMillis() + 30000 // 30 seconds from now
+                        modelManager.scheduleTimedTask(
+                            prompt = "What is the current time?",
+                            scheduledTime = futureTime,
+                            priority = com.localllm.myapplication.data.Priority.HIGH
+                        ) { result ->
+                            result.fold(
+                                onSuccess = { message ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Timed task scheduled: $message",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                },
+                                onFailure = { error ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Failed to schedule: ${error.message}",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("⏰ Schedule Timed Task (30s)")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // View pending tasks
+                Button(
+                    onClick = {
+                        Log.d("UI", "View pending tasks clicked")
+                        modelManager.getPendingBackgroundTasks { tasks ->
+                            val message = if (tasks.isEmpty()) {
+                                "No pending background tasks"
+                            } else {
+                                "Pending tasks: ${tasks.size}\n" + 
+                                tasks.take(3).joinToString("\n") { 
+                                    "${it.type}: ${it.prompt.take(30)}..." 
+                                }
+                            }
+                            android.widget.Toast.makeText(
+                                context,
+                                message,
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("📋 View Pending Tasks")
+                }
+                
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 // Direct test button
@@ -428,6 +594,27 @@ fun SignInScreen(viewModel: AuthViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text("🔧 Test Direct Execution")
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Workflow Automation Section
+                Text(
+                    text = "Workflow Automation",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                // Navigation to workflow manager
+                Button(
+                    onClick = {
+                        Log.d("UI", "Workflow Manager button clicked - starting WorkflowManagerActivity")
+                        val intent = Intent(context, com.localllm.myapplication.ui.WorkflowManagerActivity::class.java)
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("⚙️ Workflow Manager")
                 }
             } else {
                 // Sign In Section for non-authenticated users
