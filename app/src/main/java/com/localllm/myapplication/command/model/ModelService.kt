@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface ModelService {
     suspend fun loadModel(modelPath: String): Result<Unit>
     suspend fun unloadModel(): Result<Unit>
+    suspend fun reconnectToPreviousModel(): Result<Unit>
     suspend fun generateResponse(
         prompt: String,
         images: List<android.graphics.Bitmap> = emptyList(),

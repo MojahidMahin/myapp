@@ -32,6 +32,9 @@ class MediaPipeLLMService(private val context: Context) {
         try {
             Log.d(TAG, "Initializing MediaPipe LLM with model: $modelPath")
             
+            // Clean up existing resources first
+            cleanup()
+            
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(MAX_TOKENS)
@@ -55,10 +58,18 @@ class MediaPipeLLMService(private val context: Context) {
             session = LlmInferenceSession.createFromOptions(llmInference!!, sessionOptions)
             isInitialized = true
             
+            // Force garbage collection after heavy initialization
+            System.gc()
+            
             Log.d(TAG, "MediaPipe LLM initialized successfully")
             Result.success(Unit)
+        } catch (e: OutOfMemoryError) {
+            Log.e(TAG, "Out of memory during MediaPipe LLM initialization", e)
+            cleanup()
+            Result.failure(Exception("Insufficient memory to load model", e))
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize MediaPipe LLM", e)
+            cleanup()
             Result.failure(e)
         }
     }
@@ -175,13 +186,40 @@ class MediaPipeLLMService(private val context: Context) {
     
     fun cleanup() {
         try {
+            Log.d(TAG, "Starting MediaPipe LLM cleanup")
             shouldStop.set(true)
-            session?.close()
-            llmInference?.close()
+            
+            // Give time for any ongoing operations to stop
+            Thread.sleep(100)
+            
+            // Clean up session first
+            session?.let { s ->
+                try {
+                    s.close()
+                    Log.d(TAG, "Session closed")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing session", e)
+                }
+            }
             session = null
+            
+            // Clean up LLM inference
+            llmInference?.let { llm ->
+                try {
+                    llm.close()
+                    Log.d(TAG, "LLM inference closed")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error closing LLM inference", e)
+                }
+            }
             llmInference = null
+            
             isInitialized = false
-            Log.d(TAG, "MediaPipe LLM cleaned up")
+            
+            // Force garbage collection to free memory
+            System.gc()
+            
+            Log.d(TAG, "MediaPipe LLM cleaned up successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Error during cleanup", e)
         }

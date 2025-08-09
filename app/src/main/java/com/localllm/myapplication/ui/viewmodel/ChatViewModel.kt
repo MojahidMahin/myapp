@@ -30,7 +30,13 @@ class ChatViewModel(
     val modelLoadError = mutableStateOf<String?>(null)
     val canStopGeneration = mutableStateOf(false)
     
+    // Chat history repository access
+    private val chatHistoryRepository = modelManager.getChatHistoryRepository()
+    
     init {
+        // Load or create current chat session
+        loadCurrentSession()
+        
         // Observe model manager state
         viewModelScope.launch {
             modelManager.isModelLoaded.collectLatest { isLoaded ->
@@ -60,6 +66,15 @@ class ChatViewModel(
             modelManager.generationInProgress.collectLatest { generating ->
                 isGeneratingResponse.value = generating
                 canStopGeneration.value = generating
+            }
+        }
+        
+        // Observe current session from repository
+        viewModelScope.launch {
+            chatHistoryRepository.getCurrentSessionFlow().collectLatest { session ->
+                if (session != null) {
+                    loadMessagesForSession(session.id)
+                }
             }
         }
     }
@@ -183,9 +198,22 @@ class ChatViewModel(
     }
 
     private fun addMessage(message: ChatMessage) {
+        // Update local state immediately for UI responsiveness
         val currentMessages = chatSession.value.messages.toMutableList()
         currentMessages.add(message)
         chatSession.value = chatSession.value.copy(messages = currentMessages)
+        
+        // Save to persistent storage
+        modelManager.saveMessage(message) { result ->
+            result.fold(
+                onSuccess = {
+                    Log.d(TAG, "Message saved to persistent storage")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to save message to persistent storage", error)
+                }
+            )
+        }
     }
     
     private fun updateLastMessage(newText: String) {
@@ -195,6 +223,87 @@ class ChatViewModel(
             if (!lastMessage.isFromUser) {
                 currentMessages[currentMessages.lastIndex] = lastMessage.copy(text = newText)
                 chatSession.value = chatSession.value.copy(messages = currentMessages)
+                
+                // Update in persistent storage
+                modelManager.updateMessage(lastMessage.id, newText) { result ->
+                    result.fold(
+                        onSuccess = {
+                            // Don't log every update to avoid spam during streaming
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Failed to update message in persistent storage", error)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Load or create current chat session
+     */
+    private fun loadCurrentSession() {
+        viewModelScope.launch {
+            try {
+                val currentSession = chatHistoryRepository.getCurrentSession()
+                currentSession.fold(
+                    onSuccess = { session ->
+                        if (session != null) {
+                            chatSession.value = session
+                            Log.d(TAG, "Loaded existing session: ${session.id}")
+                        } else {
+                            // Create new session if none exists
+                            createNewSession()
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Failed to load current session", error)
+                        createNewSession()
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception loading current session", e)
+                createNewSession()
+            }
+        }
+    }
+    
+    /**
+     * Create a new chat session
+     */
+    private fun createNewSession() {
+        modelManager.createChatSession { result ->
+            result.fold(
+                onSuccess = { session ->
+                    chatSession.value = session
+                    Log.d(TAG, "Created new session: ${session.id}")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to create new session", error)
+                }
+            )
+        }
+    }
+    
+    /**
+     * Load messages for a specific session
+     */
+    private fun loadMessagesForSession(sessionId: String) {
+        viewModelScope.launch {
+            try {
+                val messagesResult = chatHistoryRepository.getMessages(sessionId)
+                messagesResult.fold(
+                    onSuccess = { messages ->
+                        val currentSession = chatSession.value
+                        chatSession.value = currentSession.copy(messages = messages.toMutableList())
+                        Log.d(TAG, "Loaded ${messages.size} messages for session $sessionId")
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Failed to load messages for session $sessionId", error)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Exception loading messages for session $sessionId", e)
             }
         }
     }

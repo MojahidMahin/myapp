@@ -54,6 +54,9 @@ class ModelServiceImpl(
             // Clean up existing service
             llmService?.cleanup()
             
+            // Small delay to ensure cleanup completes
+            kotlinx.coroutines.delay(200)
+            
             // Create new service and initialize
             llmService = MediaPipeLLMService(context)
             val result = llmService!!.initialize(modelPath)
@@ -76,6 +79,13 @@ class ModelServiceImpl(
                     Result.failure(error)
                 }
             )
+        } catch (e: OutOfMemoryError) {
+            _isModelLoaded.value = false
+            _isModelLoading.value = false
+            _modelLoadError.value = "Insufficient memory to load model"
+            stateRepository.saveModelState(null, false)
+            Log.e(TAG, "Out of memory loading model: $modelPath", e)
+            Result.failure(Exception("Insufficient memory to load model", e))
         } catch (e: Exception) {
             _isModelLoaded.value = false
             _isModelLoading.value = false
@@ -158,14 +168,31 @@ class ModelServiceImpl(
     override fun getCurrentModelPath(): String? = _currentModelPath.value
     override fun getModelLoadError(): String? = _modelLoadError.value
     
+    /**
+     * Reconnect to previously loaded model after app restart
+     */
+    override suspend fun reconnectToPreviousModel(): Result<Unit> {
+        val savedModelPath = stateRepository.getLastModelPath()
+        val wasModelLoaded = stateRepository.wasModelLoaded()
+        
+        if (savedModelPath != null && wasModelLoaded) {
+            Log.d(TAG, "Reconnecting to previous model: $savedModelPath")
+            return loadModel(savedModelPath)
+        }
+        
+        return Result.failure(Exception("No previous model to reconnect to"))
+    }
+    
     private fun restorePreviousState() {
         val savedModelPath = stateRepository.getLastModelPath()
         val wasModelLoaded = stateRepository.wasModelLoaded()
         
         if (savedModelPath != null && wasModelLoaded) {
             _currentModelPath.value = savedModelPath
-            // Note: Auto-loading previous model removed per user request
-            // User must explicitly load models via single button
+            // Show that model was previously loaded but needs reconnection
+            _isModelLoaded.value = false // Don't set to true since service isn't initialized
+            Log.d(TAG, "Restored previous model state: $savedModelPath (needs reconnection)")
+            // Note: Auto-loading removed - user must explicitly reconnect to restored model
         }
     }
 }
