@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.AuthConsentRequiredException
+import com.localllm.myapplication.ui.screen.TelegramBotDynamicScreen
 import com.localllm.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 
@@ -71,7 +72,7 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var emailCount by remember { mutableStateOf("5") }
     var filterKeywords by remember { mutableStateOf("") }
-    var filterType by remember { mutableStateOf("all") } // "all", "subject", "from", "body"
+    var filterType by remember { mutableStateOf("all") } // "all", "subject", "from", "body" 
     
     // Gmail sign-in launcher
     val gmailSignInLauncher = rememberLauncherForActivityResult(
@@ -139,7 +140,7 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
         }
     }
     
-    val tabs = listOf("Workflows", "Gmail", "Settings")
+    val tabs = listOf("Workflows", "Gmail", "Telegram", "Settings")
     
     Column(
         modifier = Modifier.fillMaxSize()
@@ -270,7 +271,8 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                     }
                 }
             )
-            2 -> SettingsTab(
+            2 -> TelegramBotDynamicScreen()
+            3 -> SettingsTab(
                 gmailSignedIn = gmailSignedIn,
                 gmailAccount = gmailAccount,
                 onChangeGmail = {
@@ -342,19 +344,19 @@ private fun WorkflowsTab() {
         }
         
         // Sample workflow items
-        items(3) { index ->
+        items(3) {
             WorkflowCard(
-                title = when(index) {
+                title = when(it) {
                     0 -> "Gmail → AI Analysis"
                     1 -> "Email Processing Pipeline"
                     else -> "Smart Email Automation"
                 },
-                description = when(index) {
+                description = when(it) {
                     0 -> "Automatically analyze incoming emails with AI"
                     1 -> "Process emails through multiple AI models"
                     else -> "Advanced email automation with AI responses"
                 },
-                isEnabled = index != 2,
+                isEnabled = it != 2,
                 onToggle = { /* Toggle workflow */ },
                 onEdit = { /* Edit workflow */ },
                 onRun = { /* Run workflow */ }
