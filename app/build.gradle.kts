@@ -147,4 +147,11 @@ dependencies {
     
     // JSON parsing
     implementation("org.json:json:20240303")
+
+    // by mazenul
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")          // or your version
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")       // or your version
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0") // or your version
+
+
 }
