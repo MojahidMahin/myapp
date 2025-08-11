@@ -9,6 +9,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.api.client.http.javanet.NetHttpTransport
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
+import com.google.api.client.googleapis.extensions.android.gms.auth.UserRecoverableAuthIOException
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.gmail.Gmail
 import com.google.api.services.gmail.GmailScopes
@@ -17,6 +18,11 @@ import com.google.api.services.gmail.model.Message
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Collections
+
+/**
+ * Custom exception for auth consent requirements
+ */
+class AuthConsentRequiredException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
  * Gmail integration service for workflow automation
@@ -110,7 +116,11 @@ class GmailIntegrationService(private val context: Context) {
     private fun setupGmailService(account: GoogleSignInAccount) {
         val credential = GoogleAccountCredential.usingOAuth2(
             context,
-            Collections.singleton(GmailScopes.GMAIL_READONLY)
+            listOf(
+                GmailScopes.GMAIL_READONLY,
+                GmailScopes.GMAIL_SEND,
+                GmailScopes.GMAIL_MODIFY
+            )
         )
         credential.selectedAccount = account.account
         
@@ -123,6 +133,21 @@ class GmailIntegrationService(private val context: Context) {
             .build()
     }
     
+    /**
+     * Get the most recent email (last email)
+     */
+    suspend fun getLastEmail(): Result<EmailMessage?> {
+        return checkForNewEmails(EmailCondition(isUnreadOnly = false), limit = 1)
+            .map { emails -> emails.firstOrNull() }
+    }
+
+    /**
+     * Get recent emails with a custom count
+     */
+    suspend fun getRecentEmails(count: Int = 5): Result<List<EmailMessage>> {
+        return checkForNewEmails(EmailCondition(isUnreadOnly = false), limit = count)
+    }
+
     /**
      * Check for new emails matching conditions
      */
@@ -164,6 +189,25 @@ class GmailIntegrationService(private val context: Context) {
                 
                 Result.success(emailMessages)
                 
+            } catch (e: UserRecoverableAuthIOException) {
+                Log.e(TAG, "User consent required for Gmail access", e)
+                Result.failure(AuthConsentRequiredException("User needs to grant additional Gmail permissions", e))
+            } catch (e: com.google.api.client.googleapis.json.GoogleJsonResponseException) {
+                Log.e(TAG, "Gmail API error: ${e.details?.code} - ${e.details?.message}", e)
+                when (e.details?.code) {
+                    403 -> {
+                        val isServiceDisabled = e.details.errors?.any { 
+                            it.reason == "accessNotConfigured" || it.reason == "SERVICE_DISABLED" 
+                        } == true
+                        if (isServiceDisabled) {
+                            Result.failure(Exception("Gmail API is not enabled. Please enable it in Google Cloud Console and wait a few minutes before trying again."))
+                        } else {
+                            Result.failure(Exception("Access denied. Please check your Gmail permissions."))
+                        }
+                    }
+                    401 -> Result.failure(AuthConsentRequiredException("Authentication expired. Please sign in again.", e))
+                    else -> Result.failure(Exception("Gmail API error: ${e.details?.message ?: e.message}"))
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to check for new emails", e)
                 Result.failure(e)

@@ -22,8 +22,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
 import com.localllm.myapplication.service.integration.GmailIntegrationService
+import com.localllm.myapplication.service.integration.AuthConsentRequiredException
 import com.localllm.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 
@@ -66,6 +69,9 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
     var emails by remember { mutableStateOf<List<GmailIntegrationService.EmailMessage>>(emptyList()) }
     var isLoadingEmails by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var emailCount by remember { mutableStateOf("5") }
+    var filterKeywords by remember { mutableStateOf("") }
+    var filterType by remember { mutableStateOf("all") } // "all", "subject", "from", "body"
     
     // Gmail sign-in launcher
     val gmailSignInLauncher = rememberLauncherForActivityResult(
@@ -76,22 +82,50 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
             // Handle Gmail sign-in result
             scope.launch {
                 try {
-                    // This would normally parse the result and sign in
-                    // For now, we'll simulate successful sign-in
-                    gmailSignedIn = true
-                    gmailAccount = "user@gmail.com" // This should come from actual sign-in
-                    errorMessage = null
-                    
-                    android.widget.Toast.makeText(
-                        context,
-                        "✅ Gmail signed in successfully!",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
+                    if (data != null) {
+                        // Parse the Google Sign-In result
+                        val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data)
+                        val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
+                        
+                        // Handle successful sign-in with the Gmail service
+                        val handleResult = gmailService.handleSignInResult(account)
+                        handleResult.fold(
+                            onSuccess = {
+                                gmailSignedIn = true
+                                gmailAccount = account.email
+                                errorMessage = null
+                                
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "✅ Gmail signed in successfully!",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            },
+                            onFailure = { error ->
+                                Log.e("WorkflowManager", "Failed to setup Gmail service", error)
+                                errorMessage = "Failed to setup Gmail service: ${error.message}"
+                                gmailSignedIn = false
+                                gmailAccount = null
+                            }
+                        )
+                    }
+                } catch (e: com.google.android.gms.common.api.ApiException) {
+                    Log.e("WorkflowManager", "Gmail sign-in failed", e)
+                    errorMessage = "Gmail sign-in failed: ${e.message}"
+                    gmailSignedIn = false
+                    gmailAccount = null
                 } catch (e: Exception) {
                     Log.e("WorkflowManager", "Gmail sign-in failed", e)
                     errorMessage = "Gmail sign-in failed: ${e.message}"
+                    gmailSignedIn = false
+                    gmailAccount = null
                 }
             }
+        } else {
+            // Sign-in was cancelled or failed
+            Log.w("WorkflowManager", "Gmail sign-in cancelled or failed")
+            gmailSignedIn = false
+            gmailAccount = null
         }
     }
     
@@ -140,6 +174,12 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                 emails = emails,
                 isLoadingEmails = isLoadingEmails,
                 errorMessage = errorMessage,
+                emailCount = emailCount,
+                filterKeywords = filterKeywords,
+                filterType = filterType,
+                onEmailCountChanged = { emailCount = it },
+                onFilterKeywordsChanged = { filterKeywords = it },
+                onFilterTypeChanged = { filterType = it },
                 onSignIn = {
                     scope.launch {
                         try {
@@ -160,6 +200,9 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                         gmailSignedIn = false
                         gmailAccount = null
                         emails = emptyList()
+                        errorMessage = null
+                        filterKeywords = ""
+                        filterType = "all"
                         
                         android.widget.Toast.makeText(
                             context,
@@ -172,15 +215,51 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                     scope.launch {
                         isLoadingEmails = true
                         try {
-                            val condition = GmailIntegrationService.EmailCondition(isUnreadOnly = true)
-                            val result = gmailService.checkForNewEmails(condition, 20)
+                            val count = emailCount.toIntOrNull() ?: 5
+                            
+                            // Create filter condition based on user input
+                            val condition = if (filterKeywords.isBlank()) {
+                                GmailIntegrationService.EmailCondition(isUnreadOnly = false)
+                            } else {
+                                when (filterType) {
+                                    "subject" -> GmailIntegrationService.EmailCondition(
+                                        subjectFilter = filterKeywords,
+                                        isUnreadOnly = false
+                                    )
+                                    "from" -> GmailIntegrationService.EmailCondition(
+                                        fromFilter = filterKeywords,
+                                        isUnreadOnly = false
+                                    )
+                                    "body" -> GmailIntegrationService.EmailCondition(
+                                        bodyFilter = filterKeywords,
+                                        isUnreadOnly = false
+                                    )
+                                    else -> GmailIntegrationService.EmailCondition(
+                                        bodyFilter = filterKeywords, // "all" searches in body by default
+                                        isUnreadOnly = false
+                                    )
+                                }
+                            }
+                            
+                            val result = gmailService.checkForNewEmails(condition, count)
                             result.fold(
-                                onSuccess = { emailList ->
-                                    emails = emailList
+                                onSuccess = { fetchedEmails ->
+                                    emails = fetchedEmails
                                     errorMessage = null
                                 },
                                 onFailure = { error ->
-                                    errorMessage = "Failed to load emails: ${error.message}"
+                                    when (error) {
+                                        is AuthConsentRequiredException -> {
+                                            errorMessage = "Please sign in again to grant Gmail permissions"
+                                            // Re-trigger sign-in flow
+                                            scope.launch {
+                                                gmailService.signOut()
+                                                gmailSignedIn = false
+                                                gmailAccount = null
+                                            }
+                                        }
+                                        else -> errorMessage = error.message ?: "Failed to load emails"
+                                    }
                                 }
                             )
                         } catch (e: Exception) {
@@ -201,6 +280,9 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                         gmailSignedIn = false
                         gmailAccount = null
                         emails = emptyList()
+                        errorMessage = null
+                        filterKeywords = ""
+                        filterType = "all"
                         
                         // Start new sign-in
                         try {
@@ -324,6 +406,7 @@ private fun WorkflowsTab() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GmailTab(
     gmailService: GmailIntegrationService,
@@ -332,6 +415,12 @@ private fun GmailTab(
     emails: List<GmailIntegrationService.EmailMessage>,
     isLoadingEmails: Boolean,
     errorMessage: String?,
+    emailCount: String,
+    filterKeywords: String,
+    filterType: String,
+    onEmailCountChanged: (String) -> Unit,
+    onFilterKeywordsChanged: (String) -> Unit,
+    onFilterTypeChanged: (String) -> Unit,
     onSignIn: () -> Unit,
     onSignOut: () -> Unit,
     onRefreshEmails: () -> Unit
@@ -433,6 +522,155 @@ private fun GmailTab(
                 }
             }
             
+            item {
+                // Email count input
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Number of emails to fetch:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        OutlinedTextField(
+                            value = emailCount,
+                            onValueChange = { newValue ->
+                                // Only allow numeric input
+                                if (newValue.all { it.isDigit() } && newValue.length <= 3) {
+                                    onEmailCountChanged(newValue)
+                                }
+                            },
+                            label = { Text("Count") },
+                            singleLine = true,
+                            modifier = Modifier.width(100.dp),
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number
+                            )
+                        )
+                    }
+                }
+            }
+            
+            item {
+                // Filter controls
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Email Filter",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        
+                        // Filter type dropdown
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Filter by:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f)
+                            )
+                            
+                            var expanded by remember { mutableStateOf(false) }
+                            val filterOptions = listOf(
+                                "all" to "All (Body)",
+                                "subject" to "Subject",
+                                "from" to "From",
+                                "body" to "Body"
+                            )
+                            
+                            ExposedDropdownMenuBox(
+                                expanded = expanded,
+                                onExpandedChange = { expanded = !expanded },
+                                modifier = Modifier.width(150.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = filterOptions.find { it.first == filterType }?.second ?: "All (Body)",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                    modifier = Modifier.menuAnchor(),
+                                    singleLine = true
+                                )
+                                
+                                ExposedDropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false }
+                                ) {
+                                    filterOptions.forEach { (value, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label) },
+                                            onClick = {
+                                                onFilterTypeChanged(value)
+                                                expanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Keywords input
+                        OutlinedTextField(
+                            value = filterKeywords,
+                            onValueChange = onFilterKeywordsChanged,
+                            label = { Text("Keywords") },
+                            placeholder = { Text("Enter keywords to filter emails...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(Icons.Default.Search, contentDescription = null)
+                            },
+                            trailingIcon = {
+                                if (filterKeywords.isNotEmpty()) {
+                                    IconButton(onClick = { onFilterKeywordsChanged("") }) {
+                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                    }
+                                }
+                            }
+                        )
+                        
+                        if (filterKeywords.isNotEmpty()) {
+                            val filterOptions = listOf(
+                                "all" to "All (Body)",
+                                "subject" to "Subject",
+                                "from" to "From",
+                                "body" to "Body"
+                            )
+                            Text(
+                                text = "🔍 Filtering emails by ${filterOptions.find { it.first == filterType }?.second?.lowercase()} containing: \"$filterKeywords\"",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+            
             if (errorMessage != null) {
                 item {
                     Card(
@@ -441,12 +679,30 @@ private fun GmailTab(
                             containerColor = Color.Red.copy(alpha = 0.1f)
                         )
                     ) {
-                        Text(
-                            text = "⚠️ $errorMessage",
-                            modifier = Modifier.padding(16.dp),
-                            color = Color.Red,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Column(
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Text(
+                                text = "⚠️ Error",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.Red,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = errorMessage,
+                                color = Color.Red,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (errorMessage.contains("Gmail API is not enabled")) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "💡 Next steps:\n1. Visit Google Cloud Console\n2. Enable Gmail API for your project\n3. Wait 2-3 minutes\n4. Try again",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
                 }
             }
