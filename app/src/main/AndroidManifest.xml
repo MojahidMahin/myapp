@@ -146,6 +146,24 @@
             android:label="Workflow Manager"
             android:theme="@style/Theme.MyApplication" />
 
+        <activity
+            android:name=".ui.WorkflowBuilderActivity"
+            android:exported="false"
+            android:label="Create Workflow"
+            android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".ui.DynamicWorkflowBuilderActivity"
+            android:exported="false"
+            android:label="Create Dynamic Workflow"
+            android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".ui.WorkflowMonitorActivity"
+            android:exported="false"
+            android:label="Workflow Monitor"
+            android:theme="@style/Theme.MyApplication" />
+
     </application>
 
 </manifest>

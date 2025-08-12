@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -28,6 +29,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.AuthConsentRequiredException
 import com.localllm.myapplication.ui.screen.TelegramBotDynamicScreen
+import com.localllm.myapplication.data.*
+import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 
@@ -150,6 +153,16 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
             navigationIcon = {
                 IconButton(onClick = onNavigateBack) {
                     Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                }
+            },
+            actions = {
+                IconButton(
+                    onClick = {
+                        val intent = Intent(context, WorkflowMonitorActivity::class.java)
+                        context.startActivity(intent)
+                    }
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = "Monitor")
                 }
             }
         )
@@ -305,6 +318,7 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
 
 @Composable
 private fun WorkflowsTab() {
+    val context = LocalContext.current
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -343,24 +357,9 @@ private fun WorkflowsTab() {
             )
         }
         
-        // Sample workflow items
-        items(3) {
-            WorkflowCard(
-                title = when(it) {
-                    0 -> "Gmail → AI Analysis"
-                    1 -> "Email Processing Pipeline"
-                    else -> "Smart Email Automation"
-                },
-                description = when(it) {
-                    0 -> "Automatically analyze incoming emails with AI"
-                    1 -> "Process emails through multiple AI models"
-                    else -> "Advanced email automation with AI responses"
-                },
-                isEnabled = it != 2,
-                onToggle = { /* Toggle workflow */ },
-                onEdit = { /* Edit workflow */ },
-                onRun = { /* Run workflow */ }
-            )
+        // Real workflows from repository  
+        item {
+            WorkflowsList()
         }
         
         item {
@@ -391,12 +390,16 @@ private fun WorkflowsTab() {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Set up automated Gmail processing workflows",
+                        text = "Create automated workflows between Gmail and Telegram with AI assistance",
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
-                        onClick = { /* Create workflow */ }
+                        onClick = { 
+                            // Launch dynamic workflow creation screen
+                            val intent = Intent(context, DynamicWorkflowBuilderActivity::class.java)
+                            context.startActivity(intent)
+                        }
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
@@ -890,14 +893,95 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
 }
 
 @Composable
+private fun WorkflowsList() {
+    val context = LocalContext.current
+    val workflowRepository = remember { AppContainer.provideWorkflowRepository() }
+    val userManager = remember { AppContainer.provideUserManager(context) }
+    var workflows by remember { mutableStateOf<List<Workflow>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    LaunchedEffect(Unit) {
+        val currentUserId = userManager.getCurrentUserId()
+        if (currentUserId != null) {
+            workflowRepository.getWorkflowsByUser(currentUserId).fold(
+                onSuccess = { userWorkflows ->
+                    workflows = userWorkflows
+                    isLoading = false
+                },
+                onFailure = {
+                    isLoading = false
+                }
+            )
+        } else {
+            isLoading = false
+        }
+    }
+    
+    if (isLoading) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+    } else if (workflows.isEmpty()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🤖 No workflows created yet",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Create your first workflow to automate tasks between Gmail and Telegram!",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    } else {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            workflows.forEach { workflow ->
+                WorkflowCard(
+                    workflow = workflow,
+                    onToggle = { enabled ->
+                        // TODO: Update workflow enabled state
+                    },
+                    onEdit = {
+                        // TODO: Edit workflow
+                    },
+                    onRun = {
+                        // TODO: Run workflow manually
+                    },
+                    onDelete = {
+                        // TODO: Delete workflow
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun WorkflowCard(
-    title: String,
-    description: String,
-    isEnabled: Boolean,
-    onToggle: () -> Unit,
+    workflow: Workflow,
+    onToggle: (Boolean) -> Unit,
     onEdit: () -> Unit,
-    onRun: () -> Unit
+    onRun: () -> Unit,
+    onDelete: () -> Unit
 ) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val userManager = remember { AppContainer.provideUserManager(context) }
+    var showShareDialog by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -912,20 +996,20 @@ private fun WorkflowCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = title,
+                        text = workflow.name,
                         style = MaterialTheme.typography.titleMedium
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = description,
+                        text = workflow.description,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 
                 Switch(
-                    checked = isEnabled,
-                    onCheckedChange = { onToggle() }
+                    checked = workflow.isEnabled,
+                    onCheckedChange = onToggle
                 )
             }
             
@@ -933,27 +1017,301 @@ private fun WorkflowCard(
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 OutlinedButton(
                     onClick = onRun,
                     modifier = Modifier.weight(1f),
-                    enabled = isEnabled
+                    enabled = workflow.isEnabled
                 ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Run")
+                    Text("Run", style = MaterialTheme.typography.labelMedium)
+                }
+                
+                OutlinedButton(
+                    onClick = { showShareDialog = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Share", style = MaterialTheme.typography.labelMedium)
                 }
                 
                 OutlinedButton(
                     onClick = onEdit,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Edit")
+                    Text("Edit", style = MaterialTheme.typography.labelMedium)
+                }
+                
+                OutlinedButton(
+                    onClick = onDelete,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Delete", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
     }
+    
+    // Workflow Sharing Dialog
+    if (showShareDialog) {
+        WorkflowSharingDialog(
+            workflow = workflow,
+            userManager = userManager,
+            onDismiss = { showShareDialog = false },
+            onShare = { targetUsers, permissions ->
+                scope.launch {
+                    // Share workflow with selected users
+                    shareWorkflow(workflow, targetUsers, permissions, userManager)
+                    showShareDialog = false
+                }
+            }
+        )
+    }
 }
+
+@Composable
+fun WorkflowSharingDialog(
+    workflow: Workflow,
+    userManager: com.localllm.myapplication.service.UserManager,
+    onDismiss: () -> Unit,
+    onShare: (List<WorkflowUser>, Set<Permission>) -> Unit
+) {
+    var selectedUsers by remember { mutableStateOf<List<WorkflowUser>>(emptyList()) }
+    var availableUsers by remember { mutableStateOf<List<WorkflowUser>>(emptyList()) }
+    var selectedPermissions by remember { mutableStateOf(setOf(Permission.VIEW_WORKFLOW)) }
+    var isLoading by remember { mutableStateOf(true) }
+    
+    // Load available users
+    LaunchedEffect(Unit) {
+        userManager.getAllUsers().fold(
+            onSuccess = { users ->
+                availableUsers = users.filter { user ->
+                    user.id != userManager.getCurrentUserId()
+                }
+                isLoading = false
+            },
+            onFailure = {
+                isLoading = false
+            }
+        )
+    }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Share Workflow: ${workflow.name}")
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    Text(
+                        text = "Select users to share with:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                
+                if (isLoading) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        }
+                    }
+                } else if (availableUsers.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No users available to share with or workflow is already shared with all users.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    items(availableUsers) { user ->
+                        val isSelected = selectedUsers.contains(user)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedUsers = if (isSelected) {
+                                        selectedUsers - user
+                                    } else {
+                                        selectedUsers + user
+                                    }
+                                }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    selectedUsers = if (checked) {
+                                        selectedUsers + user
+                                    } else {
+                                        selectedUsers - user
+                                    }
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = user.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (user.email != null) {
+                                    Text(
+                                        text = user.email,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                if (selectedUsers.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Permissions:",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    
+                    item {
+                        PermissionSelector(
+                            selectedPermissions = selectedPermissions,
+                            onPermissionsChanged = { selectedPermissions = it }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (selectedUsers.isNotEmpty()) {
+                        onShare(selectedUsers, selectedPermissions)
+                    }
+                },
+                enabled = selectedUsers.isNotEmpty()
+            ) {
+                Text("Share")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun PermissionSelector(
+    selectedPermissions: Set<Permission>,
+    onPermissionsChanged: (Set<Permission>) -> Unit
+) {
+    val availablePermissions = listOf(
+        Permission.VIEW_WORKFLOW to "View workflow",
+        Permission.EDIT_WORKFLOW to "Edit workflow", 
+        Permission.CREATE_WORKFLOW to "Run workflow",
+        Permission.DELETE_WORKFLOW to "Delete workflow"
+    )
+    
+    Column {
+        availablePermissions.forEach { (permission, description) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        onPermissionsChanged(
+                            if (selectedPermissions.contains(permission)) {
+                                selectedPermissions - permission
+                            } else {
+                                selectedPermissions + permission
+                            }
+                        )
+                    }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Checkbox(
+                    checked = selectedPermissions.contains(permission),
+                    onCheckedChange = { checked ->
+                        onPermissionsChanged(
+                            if (checked) {
+                                selectedPermissions + permission
+                            } else {
+                                selectedPermissions - permission
+                            }
+                        )
+                    }
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+    }
+}
+
+suspend fun shareWorkflow(
+    workflow: Workflow,
+    targetUsers: List<WorkflowUser>,
+    permissions: Set<Permission>,
+    userManager: com.localllm.myapplication.service.UserManager
+) {
+    try {
+        // Implementation would depend on your workflow repository's sharing capabilities
+        // For now, this is a placeholder that demonstrates the structure
+        
+        val currentUserId = userManager.getCurrentUserId() ?: return
+        
+        // Create sharing request
+        val sharingRequest = WorkflowSharingRequest(
+            workflowId = workflow.id,
+            sharedBy = currentUserId,
+            targetUserIds = targetUsers.map { it.id },
+            permissions = permissions,
+            message = "Shared workflow: ${workflow.name}"
+        )
+        
+        // Here you would call your repository's sharing method
+        // workflowRepository.shareWorkflow(sharingRequest)
+        
+        // For now, just log the sharing action
+        android.util.Log.d("WorkflowSharing", "Sharing workflow ${workflow.name} with ${targetUsers.size} users")
+        
+    } catch (e: Exception) {
+        android.util.Log.e("WorkflowSharing", "Failed to share workflow", e)
+    }
+}
+
+data class WorkflowSharingRequest(
+    val workflowId: String,
+    val sharedBy: String,
+    val targetUserIds: List<String>,
+    val permissions: Set<Permission>,
+    val message: String
+)
