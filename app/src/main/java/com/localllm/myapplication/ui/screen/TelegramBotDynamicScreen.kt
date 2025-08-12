@@ -19,13 +19,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localllm.myapplication.command.model.GetUpdatesResponse
-
 import com.localllm.myapplication.command.service.TelegramService
+import com.localllm.myapplication.data.TelegramPreferences
+import com.localllm.myapplication.data.TelegramUser
+import com.localllm.myapplication.utils.TelegramUtils
 
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 import kotlin.collections.filter
 import kotlin.collections.firstOrNull
 import kotlin.collections.forEach
@@ -49,25 +52,53 @@ import kotlin.toString
 
 @Composable
 fun TelegramBotDynamicScreen() {
-    var botToken by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val telegramPrefs = remember { TelegramPreferences(context) }
+    
+    var botToken by remember { mutableStateOf(telegramPrefs.getBotToken() ?: "") }
     var targetUserId by remember { mutableStateOf("") }
     var selectedUserIds by remember { mutableStateOf(setOf<Long>()) }
     var messageToSend by remember { mutableStateOf("") }
     var receivedMessage by remember { mutableStateOf("No messages yet.") }
     var sendStatus by remember { mutableStateOf("") }
     var allUserIds by remember { mutableStateOf(setOf<Long>()) }
-    var allUsers by remember { mutableStateOf(mapOf<Long, String>()) }
+    var allUsers by remember { mutableStateOf(mapOf<Long, TelegramUser>()) }
+    var savedUsers by remember { mutableStateOf(telegramPrefs.getSavedUsers()) }
+    var tokenValidationMessage by remember { mutableStateOf("") }
 
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    
+    // Initialize with saved users
+    LaunchedEffect(Unit) {
+        savedUsers = telegramPrefs.getSavedUsers()
+        allUsers = savedUsers
+        allUserIds = savedUsers.keys
+    }
 
     fun createTelegramService(): TelegramService {
+        val okHttpClient = OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .build()
+            
         return Retrofit.Builder()
             .baseUrl("https://api.telegram.org/")
             .addConverterFactory(GsonConverterFactory.create())
-            .client(OkHttpClient())
+            .client(okHttpClient)
             .build()
             .create(TelegramService::class.java)
+    }
+    
+    fun validateAndSaveToken(token: String): Boolean {
+        val (isValid, message) = TelegramUtils.validateTokenFormat(token)
+        tokenValidationMessage = message
+        
+        if (isValid) {
+            telegramPrefs.saveBotToken(token.trim())
+            return true
+        }
+        return false
     }
 
     fun copyToClipboard(context: Context, text: String) {
@@ -93,45 +124,92 @@ fun TelegramBotDynamicScreen() {
 
             OutlinedTextField(
                 value = botToken,
-                onValueChange = { botToken = it },
+                onValueChange = { 
+                    botToken = it
+                    tokenValidationMessage = ""
+                },
                 label = { Text("Bot Token") },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                supportingText = {
+                    if (tokenValidationMessage.isNotEmpty()) {
+                        Text(
+                            text = tokenValidationMessage,
+                            color = if (tokenValidationMessage.contains("Valid")) Color.Green else Color.Red
+                        )
+                    }
+                }
             )
+            
+            if (telegramPrefs.hasBotToken()) {
+                Text(
+                    text = "Saved token: ${TelegramUtils.formatTokenForDisplay(telegramPrefs.getBotToken())}",
+                    color = Color.Gray,
+                    fontSize = 12.sp
+                )
+            }
 
-            Button(
-                onClick = {
-                    scope.launch {
-                        try {
-                            val telegramService = createTelegramService()
-                            val trimmedToken = botToken.trim()
-                            val updatesUrl = "https://api.telegram.org/bot$trimmedToken/getUpdates"
-                            val response = telegramService.getUpdates(updatesUrl)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            try {
+                                val trimmedToken = botToken.trim()
+                                
+                                if (!validateAndSaveToken(trimmedToken)) {
+                                    receivedMessage = "❌ Invalid token format"
+                                    return@launch
+                                }
+                                
+                                val telegramService = createTelegramService()
+                                val offset = telegramPrefs.getLastUpdateId() + 1
+                                val updatesUrl = "https://api.telegram.org/bot$trimmedToken/getUpdates?offset=$offset&limit=10&timeout=0"
+                                val response = telegramService.getUpdates(updatesUrl)
+                            
                             if (response.isSuccessful) {
                                 val updates = response.body()?.result
+                                
+                                // Update the last update ID to prevent conflicts
+                                updates?.let { updatesList ->
+                                    if (updatesList.isNotEmpty()) {
+                                        val latestUpdateId = updatesList.maxOfOrNull { it.update_id } ?: 0
+                                        if (latestUpdateId > telegramPrefs.getLastUpdateId()) {
+                                            telegramPrefs.saveLastUpdateId(latestUpdateId)
+                                        }
+                                    }
+                                }
+                                
                                 val userIds = updates?.mapNotNull { it.message?.chat?.id }?.toSet()
                                 allUserIds = userIds ?: emptySet()
                                 
-                                val userMap = updates?.mapNotNull { update ->
+                                // Convert updates to TelegramUser objects
+                                val newUsers = updates?.mapNotNull { update ->
                                     update.message?.chat?.let { chat ->
-                                        val displayName = buildString {
-                                            chat.first_name?.let { append(it) }
-                                            chat.last_name?.let {
-                                                if (isNotEmpty()) append(" ")
-                                                append(it)
-                                            }
-                                            chat.username?.let { username ->
-                                                if (isEmpty()) {
-                                                    append("@$username")
-                                                } else {
-                                                    append(" (@$username)")
-                                                }
-                                            }
-                                            if (isEmpty()) append("Unknown User")
-                                        }
-                                        chat.id to displayName
+                                        val telegramUser = TelegramUser.fromChatInfo(
+                                            chat.id,
+                                            chat.first_name,
+                                            chat.last_name,
+                                            chat.username
+                                        )
+                                        chat.id to telegramUser
                                     }
                                 }?.toMap() ?: emptyMap()
-                                allUsers = userMap
+                                
+                                // Merge new users with saved users
+                                val mergedUsers = savedUsers.toMutableMap()
+                                newUsers.forEach { (id, user) ->
+                                    mergedUsers[id] = user
+                                }
+                                
+                                // Save new users persistently
+                                if (newUsers.isNotEmpty()) {
+                                    telegramPrefs.saveUsers(newUsers.values.toList())
+                                    savedUsers = telegramPrefs.getSavedUsers()
+                                }
+                                
+                                allUsers = mergedUsers
 
                                 val targetIds = if (selectedUserIds.isNotEmpty()) {
                                     selectedUserIds.map { it.toString() }
@@ -151,7 +229,8 @@ fun TelegramBotDynamicScreen() {
                                         messageBuilder.append("Messages from selected users:\n\n")
                                         
                                         filteredMessages.takeLast(10).forEach { update ->
-                                            val userName = allUsers[update.message?.chat?.id] ?: "Unknown User"
+                                            val user = allUsers[update.message?.chat?.id]
+                                            val userName = user?.displayName ?: "Unknown User"
                                             val message = update.message?.text ?: "No text"
                                             messageBuilder.append("$userName: $message\n")
                                         }
@@ -164,18 +243,55 @@ fun TelegramBotDynamicScreen() {
                                     receivedMessage = "Fetched ${userIds?.size ?: 0} user(s)."
                                 }
                             } else {
-                                val errorText = response.errorBody()?.string()
-                                receivedMessage = "Failed to fetch messages. $errorText"
+                                val errorBody = response.errorBody()?.string()
+                                val telegramError = TelegramUtils.parseApiError(errorBody)
+                                val commonMessage = TelegramUtils.getCommonErrorMessage(response.code())
+                                receivedMessage = "❌ $commonMessage\n${telegramError.description}"
                             }
                         } catch (e: Exception) {
-                            receivedMessage = "Error: ${e.message}"
+                            receivedMessage = "❌ Network Error: ${e.message}\nCheck your internet connection."
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.weight(1f)
             ) {
                 Text("Fetch Updates & User IDs")
             }
+            
+            Button(
+                onClick = {
+                    scope.launch {
+                        try {
+                            val trimmedToken = botToken.trim()
+                            
+                            if (!TelegramUtils.isValidBotToken(trimmedToken)) {
+                                receivedMessage = "❌ Please enter a valid bot token first"
+                                return@launch
+                            }
+                            
+                            val telegramService = createTelegramService()
+                            // Use a very high offset to clear all pending updates
+                            val clearUrl = "https://api.telegram.org/bot$trimmedToken/getUpdates?offset=-1&limit=1"
+                            val response = telegramService.getUpdates(clearUrl)
+                            
+                            if (response.isSuccessful) {
+                                telegramPrefs.saveLastUpdateId(0) // Reset offset
+                                receivedMessage = "✅ Cleared all pending updates. You can now fetch fresh data."
+                            } else {
+                                val errorBody = response.errorBody()?.string()
+                                val telegramError = TelegramUtils.parseApiError(errorBody)
+                                receivedMessage = "❌ Failed to clear updates: ${telegramError.description}"
+                            }
+                        } catch (e: Exception) {
+                            receivedMessage = "❌ Error clearing updates: ${e.message}"
+                        }
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
+            ) {
+                Text("Clear Updates")
+            }
+        }
 
             if (allUserIds.isNotEmpty()) {
                 Row(
@@ -183,7 +299,7 @@ fun TelegramBotDynamicScreen() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("All Users:", fontSize = 18.sp)
+                    Text("Saved Users (${savedUsers.size}):", fontSize = 18.sp)
                     Row {
                         Button(
                             onClick = { selectedUserIds = allUserIds },
@@ -195,9 +311,25 @@ fun TelegramBotDynamicScreen() {
                             onClick = { 
                                 selectedUserIds = emptySet()
                                 targetUserId = ""
-                            }
+                            },
+                            modifier = Modifier.padding(end = 4.dp)
                         ) {
-                            Text("Clear All", fontSize = 12.sp)
+                            Text("Clear Selection", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    telegramPrefs.clearAllUsers()
+                                    savedUsers = emptyMap()
+                                    allUsers = emptyMap()
+                                    allUserIds = emptySet()
+                                    selectedUserIds = emptySet()
+                                    receivedMessage = "✅ All users deleted permanently"
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
+                        ) {
+                            Text("Delete All", fontSize = 12.sp)
                         }
                     }
                 }
@@ -207,7 +339,8 @@ fun TelegramBotDynamicScreen() {
                         .fillMaxWidth()
                 ) {
                     items(allUserIds.toList()) { id ->
-                        val userName = allUsers[id] ?: "Unknown User"
+                        val user = allUsers[id]
+                        val userName = user?.displayName ?: "Unknown User"
                         val isSelected = selectedUserIds.contains(id)
                         
                         Row(
@@ -236,7 +369,7 @@ fun TelegramBotDynamicScreen() {
                                 }
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = userName,
                                     color = if (isSelected) Color.Blue else Color.Black,
@@ -247,6 +380,24 @@ fun TelegramBotDynamicScreen() {
                                     color = Color.Gray,
                                     fontSize = 12.sp
                                 )
+                            }
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        telegramPrefs.deleteUser(id)
+                                        savedUsers = telegramPrefs.getSavedUsers()
+                                        allUsers = savedUsers
+                                        allUserIds = savedUsers.keys
+                                        selectedUserIds = selectedUserIds - id
+                                        if (targetUserId == id.toString()) {
+                                            targetUserId = ""
+                                        }
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.7f)),
+                                modifier = Modifier.padding(start = 8.dp)
+                            ) {
+                                Text("Delete", fontSize = 10.sp)
                             }
                         }
                     }
@@ -261,7 +412,8 @@ fun TelegramBotDynamicScreen() {
                         .fillMaxWidth()
                 ) {
                     items(selectedUserIds.toList()) { id ->
-                        val userName = allUsers[id] ?: "Unknown User"
+                        val user = allUsers[id]
+                        val userName = user?.displayName ?: "Unknown User"
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -298,8 +450,19 @@ fun TelegramBotDynamicScreen() {
                 onClick = {
                     scope.launch {
                         try {
-                            val telegramService = createTelegramService()
                             val trimmedToken = botToken.trim()
+                            
+                            if (!TelegramUtils.isValidBotToken(trimmedToken)) {
+                                sendStatus = "❌ Please enter a valid bot token first"
+                                return@launch
+                            }
+                            
+                            if (messageToSend.trim().isEmpty()) {
+                                sendStatus = "❌ Please enter a message to send"
+                                return@launch
+                            }
+                            
+                            val telegramService = createTelegramService()
                             val sendUrl = "https://api.telegram.org/bot$trimmedToken/sendMessage"
                             
                             val targetIds = if (selectedUserIds.isNotEmpty()) {
@@ -317,31 +480,36 @@ fun TelegramBotDynamicScreen() {
                             
                             var successCount = 0
                             var failureCount = 0
+                            val failureReasons = mutableListOf<String>()
                             
                             for (userId in targetIds) {
                                 try {
                                     val response = telegramService.sendMessage(
                                         sendUrl,
                                         userId,
-                                        messageToSend
+                                        messageToSend.trim()
                                     )
                                     if (response.isSuccessful) {
                                         successCount++
                                     } else {
                                         failureCount++
+                                        val errorBody = response.errorBody()?.string()
+                                        val telegramError = TelegramUtils.parseApiError(errorBody)
+                                        failureReasons.add("User $userId: ${telegramError.description}")
                                     }
                                 } catch (e: Exception) {
                                     failureCount++
+                                    failureReasons.add("User $userId: ${e.message}")
                                 }
                             }
                             
                             sendStatus = when {
                                 failureCount == 0 -> "✅ Message sent to all $successCount users!"
-                                successCount == 0 -> "❌ Failed to send message to all users."
-                                else -> "⚠️ Sent to $successCount users, failed for $failureCount users."
+                                successCount == 0 -> "❌ Failed to send message to all users.\n${failureReasons.take(3).joinToString("\n")}"
+                                else -> "⚠️ Sent to $successCount users, failed for $failureCount users.\nFirst failures:\n${failureReasons.take(2).joinToString("\n")}"
                             }
                         } catch (e: Exception) {
-                            sendStatus = "Error: ${e.message}"
+                            sendStatus = "❌ Network Error: ${e.message}"
                         }
                     }
                 },

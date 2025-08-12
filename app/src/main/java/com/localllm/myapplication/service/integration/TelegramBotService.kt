@@ -2,14 +2,18 @@ package com.localllm.myapplication.service.integration
 
 import android.content.Context
 import android.util.Log
+import com.localllm.myapplication.data.TelegramPreferences
+import com.localllm.myapplication.utils.TelegramUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Telegram Bot integration service for workflow automation
@@ -22,10 +26,16 @@ class TelegramBotService(private val context: Context) {
         private const val TELEGRAM_API_BASE = "https://api.telegram.org/bot"
     }
     
-    private val httpClient = OkHttpClient()
-    private var botToken: String? = null
-    private var botUsername: String? = null
-    private var lastUpdateId: Long = 0
+    private val telegramPrefs = TelegramPreferences(context)
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .build()
+    
+    private var botToken: String? = telegramPrefs.getBotToken()
+    private var botUsername: String? = telegramPrefs.getBotUsername()
+    private var lastUpdateId: Long = telegramPrefs.getLastUpdateId()
     
     data class TelegramMessage(
         val messageId: Long,
@@ -55,27 +65,65 @@ class TelegramBotService(private val context: Context) {
     suspend fun initializeBot(token: String): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
-                botToken = token
+                val trimmedToken = token.trim()
+                
+                // Validate token format first
+                if (!TelegramUtils.isValidBotToken(trimmedToken)) {
+                    return@withContext Result.failure(
+                        Exception("Invalid token format. Expected: BOT_ID:TOKEN")
+                    )
+                }
+                
+                botToken = trimmedToken
                 
                 // Test the bot token by getting bot info
                 val botInfo = getBotInfo()
                 botInfo.fold(
                     onSuccess = { username ->
                         botUsername = username
+                        // Save to persistent storage
+                        telegramPrefs.saveBotToken(trimmedToken)
+                        telegramPrefs.saveBotUsername(username)
+                        
                         Log.d(TAG, "Telegram bot initialized successfully: @$username")
                         Result.success("Bot @$username connected successfully")
                     },
                     onFailure = { error ->
                         botToken = null
+                        botUsername = null
                         Log.e(TAG, "Failed to initialize Telegram bot", error)
                         Result.failure(error)
                     }
                 )
             } catch (e: Exception) {
                 botToken = null
+                botUsername = null
                 Log.e(TAG, "Exception initializing Telegram bot", e)
                 Result.failure(e)
             }
+        }
+    }
+    
+    /**
+     * Helper method to handle API responses consistently
+     */
+    private fun handleApiResponse(response: Response, responseBody: String?): Result<JSONObject> {
+        return try {
+            if (!response.isSuccessful) {
+                val telegramError = TelegramUtils.parseApiError(responseBody)
+                val commonMessage = TelegramUtils.getCommonErrorMessage(response.code)
+                return Result.failure(Exception("$commonMessage: ${telegramError.description}"))
+            }
+            
+            val json = JSONObject(responseBody ?: "{}")
+            if (!json.getBoolean("ok")) {
+                val telegramError = TelegramUtils.parseApiError(responseBody)
+                return Result.failure(Exception("Telegram API error: ${telegramError.description}"))
+            }
+            
+            Result.success(json)
+        } catch (e: JSONException) {
+            Result.failure(Exception("Invalid JSON response from Telegram API"))
         }
     }
     
@@ -98,24 +146,21 @@ class TelegramBotService(private val context: Context) {
                 val response = httpClient.newCall(request).execute()
                 val responseBody = response.body?.string()
                 
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(
-                        Exception("HTTP ${response.code}: $responseBody")
-                    )
-                }
+                val apiResult = handleApiResponse(response, responseBody)
+                apiResult.fold(
+                    onSuccess = { json ->
+                        val result = json.getJSONObject("result")
+                        val username = result.getString("username")
+                        Result.success(username)
+                    },
+                    onFailure = { error ->
+                        Result.failure(error)
+                    }
+                )
                 
-                val json = JSONObject(responseBody ?: "")
-                if (!json.getBoolean("ok")) {
-                    return@withContext Result.failure(
-                        Exception("Telegram API error: ${json.optString("description")}")
-                    )
-                }
-                
-                val result = json.getJSONObject("result")
-                val username = result.getString("username")
-                
-                Result.success(username)
-                
+            } catch (e: JSONException) {
+                Log.e(TAG, "Failed to parse bot info response", e)
+                Result.failure(Exception("Invalid response format from Telegram API"))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to get bot info", e)
                 Result.failure(e)
@@ -173,6 +218,10 @@ class TelegramBotService(private val context: Context) {
                     put("offset", lastUpdateId + 1)
                     put("limit", limit)
                     put("timeout", 0) // Short polling for workflow automation
+                    put("allowed_updates", JSONArray().apply {
+                        put("message")
+                        put("channel_post")
+                    })
                 }
                 
                 val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
@@ -207,6 +256,7 @@ class TelegramBotService(private val context: Context) {
                     // Update last update ID
                     if (updateId > lastUpdateId) {
                         lastUpdateId = updateId
+                        telegramPrefs.saveLastUpdateId(updateId)
                     }
                     
                     // Parse message if present
@@ -219,6 +269,9 @@ class TelegramBotService(private val context: Context) {
                 
                 Result.success(messages)
                 
+            } catch (e: JSONException) {
+                Log.e(TAG, "Failed to parse updates response", e)
+                Result.failure(Exception("Invalid response format from Telegram API"))
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to get updates", e)
                 Result.failure(e)
@@ -492,12 +545,59 @@ class TelegramBotService(private val context: Context) {
     }
     
     /**
+     * Clear all pending updates to resolve conflicts
+     */
+    suspend fun clearPendingUpdates(): Result<String> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val token = botToken ?: return@withContext Result.failure(
+                    Exception("Bot token not set. Please initialize bot first.")
+                )
+                
+                val url = "$TELEGRAM_API_BASE$token/getUpdates"
+                val requestJson = JSONObject().apply {
+                    put("offset", -1) // Clear all pending updates
+                    put("limit", 1)
+                    put("timeout", 0)
+                }
+                
+                val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url(url)
+                    .post(requestBody)
+                    .build()
+                
+                val response = httpClient.newCall(request).execute()
+                val responseBody = response.body?.string()
+                
+                val apiResult = handleApiResponse(response, responseBody)
+                apiResult.fold(
+                    onSuccess = { json ->
+                        lastUpdateId = 0
+                        telegramPrefs.saveLastUpdateId(0)
+                        Log.d(TAG, "Pending updates cleared successfully")
+                        Result.success("All pending updates cleared")
+                    },
+                    onFailure = { error ->
+                        Result.failure(error)
+                    }
+                )
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear pending updates", e)
+                Result.failure(e)
+            }
+        }
+    }
+    
+    /**
      * Clear bot configuration
      */
     fun clearBotConfig() {
         botToken = null
         botUsername = null
         lastUpdateId = 0
+        telegramPrefs.clearAll()
         Log.d(TAG, "Bot configuration cleared")
     }
 }
