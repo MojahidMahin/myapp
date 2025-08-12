@@ -63,6 +63,15 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
+    // Initialize workflow services
+    val userManager = remember { AppContainer.provideUserManager(context) }
+    val workflowRepository = remember { AppContainer.provideWorkflowRepository(context) }
+    
+    // Initialize demo user
+    LaunchedEffect(Unit) {
+        userManager.initializeDemoUser()
+    }
+    
     // Gmail integration service
     val gmailService = remember { GmailIntegrationService(context) }
     
@@ -901,18 +910,22 @@ private fun WorkflowsList() {
     var isLoading by remember { mutableStateOf(true) }
     
     LaunchedEffect(Unit) {
-        val currentUserId = userManager.getCurrentUserId()
-        if (currentUserId != null) {
-            workflowRepository.getWorkflowsByUser(currentUserId).fold(
-                onSuccess = { userWorkflows ->
-                    workflows = userWorkflows
+        try {
+            // Use default user ID for demo - in real app this would come from authentication
+            val currentUserId = "user_1"
+            
+            workflowRepository.getAllWorkflows().fold(
+                onSuccess = { allWorkflows ->
+                    workflows = allWorkflows
                     isLoading = false
                 },
-                onFailure = {
+                onFailure = { error ->
+                    android.util.Log.e("WorkflowsList", "Error loading workflows: ${error.message}")
                     isLoading = false
                 }
             )
-        } else {
+        } catch (e: Exception) {
+            android.util.Log.e("WorkflowsList", "Exception loading workflows", e)
             isLoading = false
         }
     }
@@ -944,25 +957,122 @@ private fun WorkflowsList() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = {
+                    // Create sample workflows for demo
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        val sampleWorkflows = listOf<MultiUserWorkflow>(
+                            com.localllm.myapplication.data.WorkflowTemplates.createUrgentEmailToTelegramTemplate("user_1", "user_1"),
+                            com.localllm.myapplication.data.WorkflowTemplates.createAIAutoReplyTemplate("user_1"),
+                            com.localllm.myapplication.data.WorkflowTemplates.createTelegramToEmailTemplate("user_1", "user_1")
+                        )
+                        
+                        sampleWorkflows.forEach { workflow: MultiUserWorkflow ->
+                            workflowRepository.saveWorkflow(workflow)
+                        }
+                        
+                        // Refresh the workflows list
+                        workflowRepository.getAllWorkflows().onSuccess { updatedWorkflows: List<Workflow> ->
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                workflows = updatedWorkflows
+                            }
+                        }
+                    }
+                }
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Create Sample Workflows")
+            }
         }
     } else {
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Add "Create New Workflow" button at the top
+            Button(
+                onClick = {
+                    // Create a new workflow template
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                        val newWorkflow: MultiUserWorkflow = com.localllm.myapplication.data.WorkflowTemplates.createUrgentEmailToTelegramTemplate("user_1", "user_1")
+                        workflowRepository.saveWorkflow(newWorkflow)
+                        
+                        // Refresh the workflows list
+                        workflowRepository.getAllWorkflows().onSuccess { updatedWorkflows: List<Workflow> ->
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                workflows = updatedWorkflows
+                            }
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Create New Workflow")
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
             workflows.forEach { workflow ->
                 WorkflowCard(
                     workflow = workflow,
                     onToggle = { enabled ->
-                        // TODO: Update workflow enabled state
+                        android.util.Log.d("WorkflowCard", "Toggle workflow ${workflow.name}: $enabled")
+                        // Update workflow enabled state
+                        if (workflow is MultiUserWorkflow) {
+                            val updatedWorkflow = workflow.copy(isEnabled = enabled)
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                workflowRepository.updateWorkflow(updatedWorkflow)
+                                // Refresh workflows list
+                                workflowRepository.getAllWorkflows().onSuccess { updatedWorkflows ->
+                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                        workflows = updatedWorkflows
+                                    }
+                                }
+                            }
+                        }
                     },
                     onEdit = {
-                        // TODO: Edit workflow
+                        android.util.Log.d("WorkflowCard", "Edit workflow: ${workflow.name}")
+                        // TODO: Navigate to workflow editor
                     },
                     onRun = {
-                        // TODO: Run workflow manually
+                        android.util.Log.d("WorkflowCard", "Run workflow: ${workflow.name}")
+                        // Run workflow manually
+                        val workflowEngine = AppContainer.provideWorkflowEngine(context)
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                val result = workflowEngine.executeWorkflow(
+                                    workflowId = workflow.id,
+                                    triggerUserId = "user_1",
+                                    triggerData = mapOf("manual_trigger" to true)
+                                )
+                                result.fold(
+                                    onSuccess = { executionResult ->
+                                        android.util.Log.i("WorkflowCard", "Workflow executed successfully: ${executionResult.message}")
+                                    },
+                                    onFailure = { error ->
+                                        android.util.Log.e("WorkflowCard", "Workflow execution failed: ${error.message}")
+                                    }
+                                )
+                            } catch (e: Exception) {
+                                android.util.Log.e("WorkflowCard", "Error executing workflow", e)
+                            }
+                        }
                     },
                     onDelete = {
-                        // TODO: Delete workflow
+                        android.util.Log.d("WorkflowCard", "Delete workflow: ${workflow.name}")
+                        // Delete workflow
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            workflowRepository.deleteWorkflow(workflow.id)
+                            // Refresh workflows list
+                            workflowRepository.getAllWorkflows().onSuccess { updatedWorkflows ->
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                    workflows = updatedWorkflows
+                                }
+                            }
+                        }
                     }
                 )
             }

@@ -20,7 +20,10 @@ class UserManager(private val context: Context) {
         private const val TAG = "UserManager"
     }
     
-    private val userRepository: UserRepository = InMemoryUserRepository()
+    private val userRepository: UserRepository = InMemoryUserRepository().apply {
+        // Initialize sample users
+        initializeSampleUsers()
+    }
     private val _currentUser = MutableStateFlow<WorkflowUser?>(null)
     val currentUser: StateFlow<WorkflowUser?> = _currentUser.asStateFlow()
     
@@ -96,12 +99,47 @@ class UserManager(private val context: Context) {
     /**
      * Sign out current user
      */
+    /**
+     * Get current user ID
+     */
+    fun getCurrentUserId(): String? {
+        return _currentUser.value?.id ?: "user_1" // Default user ID for demo
+    }
+    
     fun signOut() {
         _currentUser.value = null
         // Clear connected services
         gmailServices.clear()
         telegramServices.clear()
         Log.d(TAG, "User signed out")
+    }
+    
+    /**
+     * Initialize demo user for testing
+     */
+    suspend fun initializeDemoUser() {
+        val demoUser = WorkflowUser(
+            id = "user_1",
+            email = "demo@example.com",
+            displayName = "Demo User",
+            createdAt = System.currentTimeMillis(),
+            permissions = setOf(
+                Permission.CREATE_WORKFLOW,
+                Permission.EDIT_WORKFLOW,
+                Permission.EXECUTE_WORKFLOW,
+                Permission.VIEW_WORKFLOW,
+                Permission.SHARE_WORKFLOW
+            )
+        )
+        
+        try {
+            userRepository.createUser(demoUser)
+            _currentUser.value = demoUser
+            Log.d(TAG, "Demo user initialized: ${demoUser.email}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Demo user already exists or error occurred", e)
+            _currentUser.value = demoUser
+        }
     }
     
     /**
@@ -257,14 +295,26 @@ class UserManager(private val context: Context) {
      * Get Gmail service for a user
      */
     fun getGmailService(userId: String): GmailIntegrationService? {
-        return gmailServices[userId]
+        // Return existing service or create a mock one for demo
+        return gmailServices[userId] ?: run {
+            val service = GmailIntegrationService(context)
+            gmailServices[userId] = service
+            Log.d(TAG, "Created Gmail service for user: $userId")
+            service
+        }
     }
     
     /**
      * Get Telegram service for a user
      */
     fun getTelegramService(userId: String): TelegramBotService? {
-        return telegramServices[userId]
+        // Return existing service or create a mock one for demo
+        return telegramServices[userId] ?: run {
+            val service = TelegramBotService(context)
+            telegramServices[userId] = service
+            Log.d(TAG, "Created Telegram service for user: $userId")
+            service
+        }
     }
     
     /**
@@ -359,10 +409,6 @@ class UserManager(private val context: Context) {
      */
     fun isSignedIn(): Boolean = _currentUser.value != null
     
-    /**
-     * Get current user ID
-     */
-    fun getCurrentUserId(): String? = _currentUser.value?.id
     
     /**
      * Check if user has both Gmail and Telegram connected

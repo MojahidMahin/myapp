@@ -84,21 +84,29 @@ object AppContainer {
     
     fun provideWorkflowRepository(context: Context): WorkflowRepository {
         if (workflowRepository == null) {
-            workflowRepository = RoomWorkflowRepository(context.applicationContext)
+            // Use in-memory repository with sample workflows for now
+            workflowRepository = InMemoryWorkflowRepository().apply {
+                // Add sample workflows on first initialization
+                initializeSampleWorkflows()
+            }
         }
         return workflowRepository!!
     }
     
     fun provideUserRepository(context: Context): UserRepository {
         if (userRepository == null) {
-            userRepository = RoomUserRepository(context.applicationContext)
+            // Use in-memory repository with sample users
+            userRepository = InMemoryUserRepository().apply {
+                initializeSampleUsers()
+            }
         }
         return userRepository!!
     }
     
     fun provideExecutionRepository(context: Context): WorkflowExecutionRepository {
         if (executionRepository == null) {
-            executionRepository = RoomWorkflowExecutionRepository(context.applicationContext)
+            // Use in-memory repository for execution history
+            executionRepository = InMemoryWorkflowExecutionRepository()
         }
         return executionRepository!!
     }

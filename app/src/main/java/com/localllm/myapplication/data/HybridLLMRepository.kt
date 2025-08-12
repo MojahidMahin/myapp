@@ -25,70 +25,84 @@ class HybridLLMRepository(private val context: Context) : LLMRepository {
     
     override suspend fun loadModel(modelPath: String): Boolean {
         return withContext(Dispatchers.IO) {
-            Log.d(TAG, "Attempting to load model using hybrid approach")
+            Log.d(TAG, "🌍 Universal hybrid model loading for all devices")
             Log.d(TAG, "Model path: $modelPath")
             currentModelPath = modelPath
             
-            // Check if this is a Gemma3N model (prioritize MediaPipe for multimodal)
+            // Universal device detection
+            val runtime = Runtime.getRuntime()
+            val maxMemory = runtime.maxMemory() / (1024 * 1024) // MB
+            val deviceCategory = when {
+                maxMemory > 1024 -> "High-end"
+                maxMemory > 512 -> "Mid-range"
+                else -> "Budget"
+            }
+            
+            Log.d(TAG, "📱 Device: $deviceCategory (${maxMemory}MB heap)")
+            
+            // Check model type for optimization
             val isGemma3N = modelPath.contains("gemma-3n", ignoreCase = true) || 
                            modelPath.contains("gemma3n", ignoreCase = true)
             
             if (isGemma3N) {
-                Log.d(TAG, "Detected Gemma3N model - prioritizing MediaPipe for multimodal support")
+                Log.d(TAG, "Detected Gemma3N model - optimizing for multimodal support")
             }
             
-            // First, try MediaPipe (especially important for Gemma3N multimodal)
-            Log.d(TAG, "🚀 Trying MediaPipe LLM repository (v0.10.24) - OPTIMISTIC MODE")
-            Log.d(TAG, "🎯 Target: Load 3.14GB Gemma3N on Snapdragon 695 + 16GB RAM")
+            // Universal MediaPipe attempt (optimized for all devices)
+            Log.d(TAG, "🚀 Trying MediaPipe LLM repository - UNIVERSAL MODE")
+            Log.d(TAG, "🎯 Target: Load model on $deviceCategory device (${maxMemory}MB)")
             
             val mediaPipeSuccess = try {
-                Log.d(TAG, "📍 MediaPipe attempt: Let it handle large models natively")
+                Log.d(TAG, "📍 MediaPipe attempt: Universal loading for $deviceCategory device")
                 val success = mediaPipeRepository.loadModel(modelPath)
                 if (success) {
-                    Log.d(TAG, "🎉 MediaPipe successfully loaded 3.14GB Gemma3N!")
+                    Log.d(TAG, "🎉 MediaPipe successfully loaded model on $deviceCategory device!")
                 } else {
-                    Log.w(TAG, "MediaPipe returned false (but no exception)")
+                    Log.w(TAG, "MediaPipe returned false (but no exception) on $deviceCategory device")
                 }
                 success
             } catch (e: Exception) {
-                Log.w(TAG, "MediaPipe failed with exception (will try fallback)", e)
+                Log.w(TAG, "MediaPipe failed on $deviceCategory device (will try fallback)", e)
                 Log.w(TAG, "Exception details: ${e.javaClass.simpleName}: ${e.message}")
                 false
             }
             
             if (mediaPipeSuccess) {
-                Log.d(TAG, "MediaPipe successfully loaded the model")
+                Log.d(TAG, "✅ MediaPipe successfully loaded the model on $deviceCategory device")
                 activeRepository = mediaPipeRepository
                 usingFallback = false
                 return@withContext true
             }
             
-            // If MediaPipe fails, analyze the failure and try TensorFlow Lite fallback
-            Log.w(TAG, "MediaPipe failed to load model")
+            // Universal fallback analysis for all devices
+            Log.w(TAG, "MediaPipe failed to load model on $deviceCategory device")
             if (isGemma3N) {
-                Log.w(TAG, "Gemma3N model failed in MediaPipe - this may be due to tensor incompatibility")
-                Log.w(TAG, "Your gemma-3n-E2B-it-int4.task model may need:")
-                Log.w(TAG, "1. A different MediaPipe version")
-                Log.w(TAG, "2. Re-conversion with compatible tensor names")
-                Log.w(TAG, "3. A CPU-optimized variant")
+                Log.w(TAG, "Large model detection: This may exceed $deviceCategory device limits")
+                Log.w(TAG, "Universal recommendations:")
+                Log.w(TAG, "1. Use smaller quantized models (<2GB)")
+                Log.w(TAG, "2. Try Gemma 2B for better compatibility")
+                Log.w(TAG, "3. Consider TensorFlow Lite fallback")
+            } else {
+                Log.w(TAG, "Model loading failed - trying universal TensorFlow Lite fallback")
             }
             
-            Log.w(TAG, "Trying TensorFlow Lite fallback...")
+            Log.w(TAG, "Trying universal TensorFlow Lite fallback for $deviceCategory device...")
             val tensorFlowSuccess = try {
                 tensorFlowLiteRepository.loadModel(modelPath)
             } catch (e: Exception) {
-                Log.e(TAG, "TensorFlow Lite fallback also failed", e)
+                Log.e(TAG, "TensorFlow Lite fallback also failed on $deviceCategory device", e)
                 false
             }
             
             if (tensorFlowSuccess) {
-                Log.d(TAG, "TensorFlow Lite fallback successfully loaded the model")
+                Log.d(TAG, "✅ TensorFlow Lite fallback successfully loaded model on $deviceCategory device")
                 activeRepository = tensorFlowLiteRepository
                 usingFallback = true
                 return@withContext true
             }
             
-            Log.e(TAG, "Both MediaPipe and TensorFlow Lite failed to load the model")
+            Log.e(TAG, "❌ Both MediaPipe and TensorFlow Lite failed on $deviceCategory device")
+            Log.e(TAG, "Universal recommendation: Use smaller models (<2GB) for better compatibility")
             false
         }
     }
