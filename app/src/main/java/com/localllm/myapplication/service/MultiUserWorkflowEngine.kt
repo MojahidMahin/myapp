@@ -19,9 +19,11 @@ class MultiUserWorkflowEngine(
     private val context: Context,
     private val userManager: UserManager,
     private val workflowRepository: WorkflowRepository,
-    private val executionRepository: WorkflowExecutionRepository,
+    val executionRepository: WorkflowExecutionRepository,
     private val aiProcessor: AIWorkflowProcessor
 ) {
+    
+    private val validator = WorkflowValidator(context)
     
     companion object {
         private const val TAG = "MultiUserWorkflowEngine"
@@ -49,17 +51,40 @@ class MultiUserWorkflowEngine(
     ): Result<WorkflowExecutionResult> {
         return withContext(Dispatchers.IO) {
             try {
-                Log.d(TAG, "Starting workflow execution: $workflowId by user: $triggerUserId")
+                Log.i(TAG, "=== Starting workflow execution ===")
+                Log.i(TAG, "Workflow ID: $workflowId")
+                Log.i(TAG, "Trigger User ID: $triggerUserId")
+                Log.i(TAG, "Trigger Data: $triggerData")
                 
                 // Get workflow
                 val workflow = workflowRepository.getWorkflowById(workflowId).getOrNull() as? MultiUserWorkflow
-                    ?: return@withContext Result.failure(Exception("Workflow not found or invalid type"))
+                if (workflow == null) {
+                    Log.e(TAG, "Workflow not found: $workflowId")
+                    return@withContext Result.failure(Exception("Workflow not found or invalid type"))
+                }
+                
+                Log.d(TAG, "Found workflow: ${workflow.name} (${workflow.actions.size} actions)")
+                
+                // Validate workflow before execution
+                val validationResult = validator.validateWorkflow(workflow, userManager)
+                if (!validationResult.isValid) {
+                    val validationSummary = validator.getValidationSummary(validationResult)
+                    Log.e(TAG, "Workflow validation failed:\n$validationSummary")
+                    return@withContext Result.failure(Exception("Workflow validation failed: ${validationResult.errors.joinToString("; ") { it.message }}"))
+                }
+                
+                if (validationResult.warnings.isNotEmpty()) {
+                    Log.w(TAG, "Workflow has warnings: ${validationResult.warnings.joinToString("; ") { it.message }}")
+                }
                 
                 // Check permissions
                 val hasPermission = workflowRepository.hasPermission(triggerUserId, workflowId, Permission.EXECUTE_WORKFLOW).getOrNull() ?: false
                 if (!hasPermission) {
+                    Log.w(TAG, "Permission denied for user $triggerUserId to execute workflow $workflowId")
                     return@withContext Result.failure(Exception("User does not have permission to execute this workflow"))
                 }
+                
+                Log.d(TAG, "Permission check passed for user: $triggerUserId")
                 
                 // Create execution context
                 val context = WorkflowExecutionContext(
@@ -86,9 +111,15 @@ class MultiUserWorkflowEngine(
                     )
                     
                     // Save execution history
-                    executionRepository.saveExecution(executionResult)
+                    val saveResult = executionRepository.saveExecution(executionResult)
+                    saveResult.onFailure { error ->
+                        Log.w(TAG, "Failed to save execution result: ${error.message}")
+                    }
                     
-                    Log.d(TAG, "Workflow execution completed: ${executionResult.success}")
+                    Log.i(TAG, "=== Workflow execution completed ===")
+                    Log.i(TAG, "Success: ${executionResult.success}")
+                    Log.i(TAG, "Duration: ${executionResult.duration}ms")
+                    Log.i(TAG, "Message: ${executionResult.message}")
                     Result.success(executionResult)
                     
                 } finally {
@@ -158,7 +189,10 @@ class MultiUserWorkflowEngine(
      */
     private suspend fun executeAction(action: MultiUserAction, context: WorkflowExecutionContext): Result<String> {
         return try {
-            when (action) {
+            Log.d(TAG, "Executing action: ${action::class.simpleName}")
+            val startTime = System.currentTimeMillis()
+            
+            val result = when (action) {
                 // Gmail Actions
                 is MultiUserAction.SendToUserGmail -> executeSendToUserGmail(action, context)
                 is MultiUserAction.ReplyToUserGmail -> executeReplyToUserGmail(action, context)
@@ -189,6 +223,18 @@ class MultiUserWorkflowEngine(
                 is MultiUserAction.LogAction -> executeLog(action)
                 is MultiUserAction.NotificationAction -> executeNotification(action, context)
             }
+            
+            val duration = System.currentTimeMillis() - startTime
+            result.fold(
+                onSuccess = { message ->
+                    Log.d(TAG, "Action ${action::class.simpleName} completed successfully in ${duration}ms: $message")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Action ${action::class.simpleName} failed after ${duration}ms: ${error.message}")
+                }
+            )
+            
+            result
         } catch (e: Exception) {
             Log.e(TAG, "Error executing action: ${action::class.simpleName}", e)
             Result.failure(e)
@@ -197,17 +243,28 @@ class MultiUserWorkflowEngine(
     
     // Gmail Action Implementations
     private suspend fun executeSendToUserGmail(action: MultiUserAction.SendToUserGmail, context: WorkflowExecutionContext): Result<String> {
+        Log.d(TAG, "Sending Gmail to user: ${action.targetUserId}")
+        
         val gmailService = userManager.getGmailService(action.targetUserId)
-            ?: return Result.failure(Exception("Gmail service not available for user"))
+        if (gmailService == null) {
+            Log.e(TAG, "Gmail service not available for user: ${action.targetUserId}")
+            return Result.failure(Exception("Gmail service not available for user"))
+        }
         
         val targetUser = userManager.getUserById(action.targetUserId).getOrNull()
-            ?: return Result.failure(Exception("Target user not found"))
+        if (targetUser == null) {
+            Log.e(TAG, "Target user not found: ${action.targetUserId}")
+            return Result.failure(Exception("Target user not found"))
+        }
         
         val toEmail = action.to ?: targetUser.email
         val processedSubject = replaceVariables(action.subject, context.variables)
         val processedBody = replaceVariables(action.body, context.variables)
         
+        Log.d(TAG, "Sending email to: $toEmail, Subject: $processedSubject")
+        
         return gmailService.sendEmail(toEmail, processedSubject, processedBody, action.isHtml)
+            .map { messageId -> "Email sent successfully with ID: $messageId" }
     }
     
     private suspend fun executeReplyToUserGmail(action: MultiUserAction.ReplyToUserGmail, context: WorkflowExecutionContext): Result<String> {

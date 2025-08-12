@@ -109,12 +109,15 @@ class UserManager(private val context: Context) {
      */
     suspend fun connectGmail(user: WorkflowUser): Result<Unit> {
         return try {
+            Log.d(TAG, "Attempting to connect Gmail for user: ${user.email}")
+            
             // Create Gmail service for this user
             val gmailService = GmailIntegrationService(context)
             val initResult = gmailService.initialize()
             
             initResult.fold(
                 onSuccess = {
+                    Log.d(TAG, "Gmail service initialized successfully for user: ${user.email}")
                     gmailServices[user.id] = gmailService
                     
                     // Update user record
@@ -123,58 +126,73 @@ class UserManager(private val context: Context) {
                     updateResult.fold(
                         onSuccess = {
                             _currentUser.value = updatedUser
-                            Log.d(TAG, "Gmail connected for user: ${user.email}")
+                            Log.i(TAG, "Gmail connected successfully for user: ${user.email}")
                             Result.success(Unit)
                         },
                         onFailure = { error ->
+                            Log.e(TAG, "Failed to update user record after Gmail connection", error)
                             gmailServices.remove(user.id)
-                            Result.failure(error)
+                            Result.failure(Exception("Failed to save Gmail connection: ${error.message}"))
                         }
                     )
                 },
                 onFailure = { error ->
-                    Log.e(TAG, "Failed to initialize Gmail service", error)
-                    Result.failure(error)
+                    Log.e(TAG, "Failed to initialize Gmail service for user: ${user.email}", error)
+                    Result.failure(Exception("Gmail initialization failed: ${error.message}"))
                 }
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error connecting Gmail for user: ${user.email}", e)
-            Result.failure(e)
+            Result.failure(Exception("Gmail connection error: ${e.message}"))
         }
     }
     
     /**
      * Connect Telegram for current user
      */
-    suspend fun connectTelegram(user: WorkflowUser, telegramUserId: Long, telegramUsername: String?): Result<Unit> {
+    suspend fun connectTelegram(user: WorkflowUser, botToken: String, telegramUserId: Long, telegramUsername: String?): Result<Unit> {
         return try {
+            Log.d(TAG, "Attempting to connect Telegram for user: ${user.email}")
+            
             // Create Telegram service for this user
             val telegramService = TelegramBotService(context)
-            telegramServices[user.id] = telegramService
             
-            // Update user record
-            val updatedUser = user.copy(
-                telegramConnected = true,
-                telegramUserId = telegramUserId,
-                telegramUsername = telegramUsername
-            )
-            
-            val updateResult = userRepository.updateUser(updatedUser)
-            updateResult.fold(
-                onSuccess = {
-                    _currentUser.value = updatedUser
-                    Log.d(TAG, "Telegram connected for user: ${user.email}")
-                    Result.success(Unit)
+            // Initialize Telegram bot with token
+            val initResult = telegramService.initializeBot(botToken)
+            initResult.fold(
+                onSuccess = { botUsername ->
+                    Log.d(TAG, "Telegram bot initialized successfully: $botUsername")
+                    telegramServices[user.id] = telegramService
+                    
+                    // Update user record
+                    val updatedUser = user.copy(
+                        telegramConnected = true,
+                        telegramUserId = telegramUserId,
+                        telegramUsername = telegramUsername
+                    )
+                    
+                    val updateResult = userRepository.updateUser(updatedUser)
+                    updateResult.fold(
+                        onSuccess = {
+                            _currentUser.value = updatedUser
+                            Log.i(TAG, "Telegram connected successfully for user: ${user.email}")
+                            Result.success(Unit)
+                        },
+                        onFailure = { error ->
+                            Log.e(TAG, "Failed to update user record after Telegram connection", error)
+                            telegramServices.remove(user.id)
+                            Result.failure(Exception("Failed to save Telegram connection: ${error.message}"))
+                        }
+                    )
                 },
                 onFailure = { error ->
-                    telegramServices.remove(user.id)
-                    Log.e(TAG, "Failed to update user with Telegram info", error)
-                    Result.failure(error)
+                    Log.e(TAG, "Failed to initialize Telegram bot for user: ${user.email}", error)
+                    Result.failure(Exception("Telegram bot initialization failed: ${error.message}"))
                 }
             )
         } catch (e: Exception) {
             Log.e(TAG, "Error connecting Telegram for user: ${user.email}", e)
-            Result.failure(e)
+            Result.failure(Exception("Telegram connection error: ${e.message}"))
         }
     }
     
@@ -384,11 +402,9 @@ class UserManager(private val context: Context) {
             
             // Initialize Telegram if connected
             if (user.telegramConnected && !telegramServices.containsKey(user.id) && user.telegramUserId != null) {
-                val telegramResult = connectTelegram(user, user.telegramUserId!!, user.telegramUsername)
-                if (telegramResult.isFailure) {
-                    success = false
-                    errors.add("Telegram initialization failed: ${telegramResult.exceptionOrNull()?.message}")
-                }
+                // Note: Bot token would need to be retrieved from secure storage
+                // For now, skip Telegram re-initialization without bot token
+                Log.w(TAG, "Telegram re-initialization skipped - bot token required")
             }
             
             if (success) {

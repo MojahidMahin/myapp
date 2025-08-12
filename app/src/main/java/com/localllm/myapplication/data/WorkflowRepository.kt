@@ -47,6 +47,7 @@ interface WorkflowExecutionRepository {
     suspend fun getUserExecutionHistory(userId: String, limit: Int = 50): Result<List<WorkflowExecutionResult>>
     suspend fun getExecutionById(executionId: String): Result<WorkflowExecutionResult?>
     suspend fun deleteOldExecutions(olderThanDays: Int): Result<Unit>
+    suspend fun getAllExecutions(limit: Int = 50): Result<List<WorkflowExecutionResult>>
 }
 
 /**
@@ -249,5 +250,12 @@ class InMemoryWorkflowExecutionRepository : WorkflowExecutionRepository {
         val toRemove = executions.values.filter { it.timestamp < cutoffTime }.map { it.executionId }
         toRemove.forEach { executions.remove(it) }
         return Result.success(Unit)
+    }
+    
+    override suspend fun getAllExecutions(limit: Int): Result<List<WorkflowExecutionResult>> {
+        val allExecutions = executions.values
+            .sortedByDescending { it.timestamp }
+            .take(limit)
+        return Result.success(allExecutions)
     }
 }

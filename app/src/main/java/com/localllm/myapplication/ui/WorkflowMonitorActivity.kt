@@ -51,7 +51,7 @@ fun WorkflowMonitorScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val workflowRepository = remember { AppContainer.provideWorkflowRepository() }
+    val workflowRepository = remember { AppContainer.provideWorkflowRepository(context) }
     val userManager = remember { AppContainer.provideUserManager(context) }
     
     var selectedTab by remember { mutableStateOf(0) }

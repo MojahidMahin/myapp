@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Context
 import com.localllm.myapplication.command.SignInCommand
 import com.localllm.myapplication.data.*
+import com.localllm.myapplication.data.database.*
 import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.*
 import com.localllm.myapplication.ui.viewmodel.AuthViewModel
@@ -25,6 +26,8 @@ object AppContainer {
     private var executionRepository: WorkflowExecutionRepository? = null
     private var aiWorkflowProcessor: AIWorkflowProcessor? = null
     private var workflowEngine: MultiUserWorkflowEngine? = null
+    private var triggerManager: WorkflowTriggerManager? = null
+    private var importExportManager: WorkflowImportExportManager? = null
 
     fun provideAuthViewModel(activity: Activity): AuthViewModel {
         val authRepository = FirebaseAuthRepository(activity)
@@ -79,23 +82,23 @@ object AppContainer {
         return userManager!!
     }
     
-    fun provideWorkflowRepository(): WorkflowRepository {
+    fun provideWorkflowRepository(context: Context): WorkflowRepository {
         if (workflowRepository == null) {
-            workflowRepository = InMemoryWorkflowRepository()
+            workflowRepository = RoomWorkflowRepository(context.applicationContext)
         }
         return workflowRepository!!
     }
     
-    fun provideUserRepository(): UserRepository {
+    fun provideUserRepository(context: Context): UserRepository {
         if (userRepository == null) {
-            userRepository = InMemoryUserRepository()
+            userRepository = RoomUserRepository(context.applicationContext)
         }
         return userRepository!!
     }
     
-    fun provideExecutionRepository(): WorkflowExecutionRepository {
+    fun provideExecutionRepository(context: Context): WorkflowExecutionRepository {
         if (executionRepository == null) {
-            executionRepository = InMemoryWorkflowExecutionRepository()
+            executionRepository = RoomWorkflowExecutionRepository(context.applicationContext)
         }
         return executionRepository!!
     }
@@ -111,8 +114,8 @@ object AppContainer {
     fun provideWorkflowEngine(context: Context): MultiUserWorkflowEngine {
         if (workflowEngine == null) {
             val userMgr = provideUserManager(context)
-            val workflowRepo = provideWorkflowRepository()
-            val executionRepo = provideExecutionRepository()
+            val workflowRepo = provideWorkflowRepository(context)
+            val executionRepo = provideExecutionRepository(context)
             val aiProcessor = provideAIWorkflowProcessor(context)
             
             workflowEngine = MultiUserWorkflowEngine(
@@ -125,6 +128,36 @@ object AppContainer {
         }
         return workflowEngine!!
     }
+    
+    fun provideTriggerManager(context: Context): WorkflowTriggerManager {
+        if (triggerManager == null) {
+            val engine = provideWorkflowEngine(context)
+            val workflowRepo = provideWorkflowRepository(context)
+            val userMgr = provideUserManager(context)
+            
+            triggerManager = WorkflowTriggerManager(
+                context = context.applicationContext,
+                workflowEngine = engine,
+                workflowRepository = workflowRepo,
+                userManager = userMgr
+            )
+        }
+        return triggerManager!!
+    }
+    
+    fun provideImportExportManager(context: Context): WorkflowImportExportManager {
+        if (importExportManager == null) {
+            val workflowRepo = provideWorkflowRepository(context)
+            val userMgr = provideUserManager(context)
+            
+            importExportManager = WorkflowImportExportManager(
+                context = context.applicationContext,
+                workflowRepository = workflowRepo,
+                userManager = userMgr
+            )
+        }
+        return importExportManager!!
+    }
 
     fun cleanup() {
         backgroundServiceManager?.stopBackgroundService()
@@ -136,6 +169,9 @@ object AppContainer {
         aiGalleryViewModel = null
         
         // Cleanup workflow services
+        triggerManager?.stop()
+        triggerManager = null
+        importExportManager = null
         userManager = null
         workflowRepository = null
         userRepository = null

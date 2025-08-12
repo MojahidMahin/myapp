@@ -895,7 +895,7 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
 @Composable
 private fun WorkflowsList() {
     val context = LocalContext.current
-    val workflowRepository = remember { AppContainer.provideWorkflowRepository() }
+    val workflowRepository = remember { AppContainer.provideWorkflowRepository(context) }
     val userManager = remember { AppContainer.provideUserManager(context) }
     var workflows by remember { mutableStateOf<List<Workflow>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }

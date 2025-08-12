@@ -61,8 +61,30 @@ fun DynamicWorkflowBuilderScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val userManager = remember { AppContainer.provideUserManager(context) }
-    val workflowRepository = remember { AppContainer.provideWorkflowRepository() }
+    val workflowRepository = remember { AppContainer.provideWorkflowRepository(context) }
     val workflowEngine = remember { AppContainer.provideWorkflowEngine(context) }
+    
+    // Check if user is signed in
+    val currentUser by userManager.currentUser.collectAsState()
+    
+    LaunchedEffect(Unit) {
+        android.util.Log.d("WorkflowBuilder", "=== DynamicWorkflowBuilderScreen initialized ===")
+        android.util.Log.d("WorkflowBuilder", "Current user: ${currentUser?.email ?: "Not signed in"}")
+        
+        // Auto-sign in a test user if no user is signed in
+        if (currentUser == null) {
+            android.util.Log.i("WorkflowBuilder", "No user signed in, creating test user...")
+            val testUserResult = userManager.registerOrGetUser("test@workflow.app", "Test User")
+            testUserResult.fold(
+                onSuccess = { user ->
+                    android.util.Log.i("WorkflowBuilder", "Test user signed in: ${user.email}")
+                },
+                onFailure = { error ->
+                    android.util.Log.e("WorkflowBuilder", "Failed to create test user: ${error.message}")
+                }
+            )
+        }
+    }
     
     // Workflow building state
     var workflowName by remember { mutableStateOf("") }
@@ -109,7 +131,14 @@ fun DynamicWorkflowBuilderScreen(
                     // Create workflow button
                     TextButton(
                         onClick = {
+                            android.util.Log.d("WorkflowBuilder", "CREATE button clicked!")
+                            android.util.Log.d("WorkflowBuilder", "Workflow name: '$workflowName'")
+                            android.util.Log.d("WorkflowBuilder", "Selected trigger: $selectedTrigger")
+                            android.util.Log.d("WorkflowBuilder", "Selected actions: ${selectedActions.size}")
+                            android.util.Log.d("WorkflowBuilder", "Can create: ${canCreateWorkflow(workflowName, selectedTrigger, selectedActions)}")
+                            
                             if (canCreateWorkflow(workflowName, selectedTrigger, selectedActions)) {
+                                android.util.Log.i("WorkflowBuilder", "Starting workflow creation...")
                                 scope.launch {
                                     isCreating = true
                                     createDynamicWorkflow(
@@ -121,14 +150,18 @@ fun DynamicWorkflowBuilderScreen(
                                         userManager = userManager,
                                         workflowRepository = workflowRepository,
                                         onSuccess = {
+                                            android.util.Log.i("WorkflowBuilder", "Workflow created successfully!")
                                             isCreating = false
                                             onWorkflowCreated()
                                         },
-                                        onError = { 
+                                        onError = { error ->
+                                            android.util.Log.e("WorkflowBuilder", "Workflow creation failed: ${error.message}")
                                             isCreating = false
                                         }
                                     )
                                 }
+                            } else {
+                                android.util.Log.w("WorkflowBuilder", "Cannot create workflow - missing requirements")
                             }
                         },
                         enabled = canCreateWorkflow(workflowName, selectedTrigger, selectedActions) && !isCreating
@@ -690,14 +723,34 @@ suspend fun createDynamicWorkflow(
     onError: (Exception) -> Unit
 ) {
     try {
-        val currentUserId = userManager.getCurrentUserId() ?: throw Exception("User not signed in")
+        android.util.Log.i("WorkflowBuilder", "=== Starting createDynamicWorkflow ===")
+        android.util.Log.i("WorkflowBuilder", "Name: $name")
+        android.util.Log.i("WorkflowBuilder", "Description: $description")
+        android.util.Log.i("WorkflowBuilder", "Trigger: $trigger")
+        android.util.Log.i("WorkflowBuilder", "Actions count: ${actions.size}")
+        android.util.Log.i("WorkflowBuilder", "Users count: ${users.size}")
+        
+        val currentUserId = userManager.getCurrentUserId()
+        android.util.Log.d("WorkflowBuilder", "Current user ID: $currentUserId")
+        
+        if (currentUserId == null) {
+            android.util.Log.e("WorkflowBuilder", "User not signed in!")
+            throw Exception("User not signed in")
+        }
         
         // Convert configs to actual workflow objects
+        android.util.Log.d("WorkflowBuilder", "Converting trigger config...")
         val workflowTrigger = convertTriggerConfig(trigger, currentUserId)
-        val workflowActions = actions.map { convertActionConfig(it, users) }
+        android.util.Log.d("WorkflowBuilder", "Trigger converted: $workflowTrigger")
         
+        android.util.Log.d("WorkflowBuilder", "Converting action configs...")
+        val workflowActions = actions.map { convertActionConfig(it, users) }
+        android.util.Log.d("WorkflowBuilder", "Actions converted: ${workflowActions.size}")
+        
+        android.util.Log.d("WorkflowBuilder", "Creating workflow object...")
+        val workflowId = UUID.randomUUID().toString()
         val workflow = MultiUserWorkflow(
-            id = UUID.randomUUID().toString(),
+            id = workflowId,
             name = name,
             description = description,
             createdBy = currentUserId,
@@ -706,13 +759,22 @@ suspend fun createDynamicWorkflow(
             triggers = listOf(workflowTrigger),
             actions = workflowActions
         )
+        android.util.Log.i("WorkflowBuilder", "Workflow object created with ID: $workflowId")
         
+        android.util.Log.d("WorkflowBuilder", "Saving workflow to repository...")
         val result = workflowRepository.saveWorkflow(workflow)
         result.fold(
-            onSuccess = { onSuccess() },
-            onFailure = { onError(it as Exception) }
+            onSuccess = { 
+                android.util.Log.i("WorkflowBuilder", "Workflow saved successfully!")
+                onSuccess() 
+            },
+            onFailure = { error ->
+                android.util.Log.e("WorkflowBuilder", "Failed to save workflow: ${error.message}")
+                onError(error as Exception) 
+            }
         )
     } catch (e: Exception) {
+        android.util.Log.e("WorkflowBuilder", "Exception in createDynamicWorkflow: ${e.message}", e)
         onError(e)
     }
 }

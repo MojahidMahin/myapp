@@ -46,7 +46,7 @@ fun WorkflowBuilderScreen(
 ) {
     val context = LocalContext.current
     val userManager = remember { AppContainer.provideUserManager(context) }
-    val workflowRepository = remember { AppContainer.provideWorkflowRepository() }
+    val workflowRepository = remember { AppContainer.provideWorkflowRepository(context) }
     val workflowEngine = remember { AppContainer.provideWorkflowEngine(context) }
     
     var selectedTab by remember { mutableStateOf(0) }

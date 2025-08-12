@@ -3,7 +3,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    // kotlin("kapt") // Temporarily disabled
+    kotlin("kapt")
 }
 
 android {
@@ -136,7 +136,7 @@ dependencies {
     // Room database
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
-    // kapt("androidx.room:room-compiler:2.6.1") // Temporarily disabled
+    kapt("androidx.room:room-compiler:2.6.1")
     
     // JavaMail for Gmail integration  
     implementation("javax.mail:mail:1.4.7")
