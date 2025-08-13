@@ -264,20 +264,7 @@ class InMemoryWorkflowExecutionRepository : WorkflowExecutionRepository {
  * Extension functions to initialize sample data
  */
 fun InMemoryWorkflowRepository.initializeSampleWorkflows() {
-    val currentUserId = "user_1" // Default user ID
-    
-    // Add sample workflows from templates
-    val sampleWorkflows = listOf(
-        WorkflowTemplates.createUrgentEmailToTelegramTemplate(currentUserId, currentUserId),
-        WorkflowTemplates.createAIAutoReplyTemplate(currentUserId),
-        WorkflowTemplates.createTelegramToEmailTemplate(currentUserId, currentUserId)
-    )
-    
-    sampleWorkflows.forEach { workflow ->
-        kotlinx.coroutines.runBlocking {
-            saveWorkflow(workflow)
-        }
-    }
+    // No default workflows - users create their own
 }
 
 fun InMemoryUserRepository.initializeSampleUsers() {

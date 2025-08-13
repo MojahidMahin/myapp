@@ -120,7 +120,7 @@ object WorkflowTemplates {
                 ),
                 MultiUserAction.ReplyToUserGmail(
                     targetUserId = creatorUserId,
-                    originalMessageId = "{{email_id}}",
+                    originalMessageId = "{{trigger_email_id}}",
                     replyBody = "{{ai_reply}}\n\n---\nThis is an automated AI-generated response. A human will follow up if needed."
                 )
             )

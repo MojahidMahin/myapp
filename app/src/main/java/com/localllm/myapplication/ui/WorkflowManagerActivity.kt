@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.AuthConsentRequiredException
 import com.localllm.myapplication.ui.screen.TelegramBotDynamicScreen
@@ -66,10 +67,57 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
     // Initialize workflow services
     val userManager = remember { AppContainer.provideUserManager(context) }
     val workflowRepository = remember { AppContainer.provideWorkflowRepository(context) }
+    val triggerManager = remember { AppContainer.provideTriggerManager(context) }
     
-    // Initialize demo user
+    // Initialize demo user and start trigger manager
     LaunchedEffect(Unit) {
         userManager.initializeDemoUser()
+        
+        // Check if Gmail is already signed in and register it
+        try {
+            val existingAccount = com.google.android.gms.auth.api.signin.GoogleSignIn.getLastSignedInAccount(context)
+            if (existingAccount != null) {
+                val existingGmailService = GmailIntegrationService(context)
+                val handleResult = existingGmailService.handleSignInResult(existingAccount)
+                handleResult.fold(
+                    onSuccess = {
+                        userManager.registerGmailService("user_1", existingGmailService)
+                        android.util.Log.i("WorkflowManager", "Existing Gmail account registered for workflows")
+                    },
+                    onFailure = { error ->
+                        android.util.Log.w("WorkflowManager", "Failed to register existing Gmail: ${error.message}")
+                    }
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("WorkflowManager", "Failed to check existing Gmail sign-in", e)
+        }
+        
+        // Check if Telegram is already configured and register it
+        val telegramPrefs = com.localllm.myapplication.data.TelegramPreferences(context)
+        val savedToken = telegramPrefs.getBotToken()
+        if (!savedToken.isNullOrBlank()) {
+            try {
+                val telegramService = com.localllm.myapplication.service.integration.TelegramBotService(context)
+                // Initialize the service with the saved token
+                val initResult = telegramService.initializeBot(savedToken)
+                initResult.fold(
+                    onSuccess = { botInfo ->
+                        userManager.registerTelegramService("user_1", telegramService)
+                        android.util.Log.i("WorkflowManager", "Existing Telegram bot registered for workflows: $botInfo")
+                    },
+                    onFailure = { error ->
+                        android.util.Log.w("WorkflowManager", "Failed to initialize existing Telegram bot: ${error.message}")
+                    }
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("WorkflowManager", "Failed to register existing Telegram service", e)
+            }
+        }
+        
+        // Start the trigger manager to enable automatic workflows
+        triggerManager.start()
+        android.util.Log.i("WorkflowManager", "Trigger manager started for automatic workflows")
     }
     
     // Gmail integration service
@@ -108,9 +156,17 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                                 gmailAccount = account.email
                                 errorMessage = null
                                 
+                                // Register Gmail service with UserManager for workflows
+                                try {
+                                    userManager.registerGmailService("user_1", gmailService)
+                                    android.util.Log.i("WorkflowManager", "Gmail service registered for workflows")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("WorkflowManager", "Failed to register Gmail service for workflows", e)
+                                }
+                                
                                 android.widget.Toast.makeText(
                                     context,
-                                    "✅ Gmail signed in successfully!",
+                                    "✅ Gmail signed in successfully! Workflows can now access Gmail.",
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             },
@@ -908,8 +964,15 @@ private fun WorkflowsList() {
     val userManager = remember { AppContainer.provideUserManager(context) }
     var workflows by remember { mutableStateOf<List<Workflow>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var refreshTrigger by remember { mutableStateOf(0) }
     
-    LaunchedEffect(Unit) {
+    // Function to refresh workflows
+    val refreshWorkflows = {
+        isLoading = true
+        refreshTrigger += 1
+    }
+    
+    LaunchedEffect(refreshTrigger) {
         try {
             // Use default user ID for demo - in real app this would come from authentication
             val currentUserId = "user_1"
@@ -918,6 +981,7 @@ private fun WorkflowsList() {
                 onSuccess = { allWorkflows ->
                     workflows = allWorkflows
                     isLoading = false
+                    android.util.Log.d("WorkflowsList", "Loaded ${allWorkflows.size} workflows")
                 },
                 onFailure = { error ->
                     android.util.Log.e("WorkflowsList", "Error loading workflows: ${error.message}")
@@ -927,6 +991,21 @@ private fun WorkflowsList() {
         } catch (e: Exception) {
             android.util.Log.e("WorkflowsList", "Exception loading workflows", e)
             isLoading = false
+        }
+    }
+    
+    // Refresh when activity resumes
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                android.util.Log.d("WorkflowsList", "Activity resumed, refreshing workflows")
+                refreshWorkflows()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
         }
     }
     
@@ -960,60 +1039,20 @@ private fun WorkflowsList() {
             Spacer(modifier = Modifier.height(16.dp))
             Button(
                 onClick = {
-                    // Create sample workflows for demo
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        val sampleWorkflows = listOf<MultiUserWorkflow>(
-                            com.localllm.myapplication.data.WorkflowTemplates.createUrgentEmailToTelegramTemplate("user_1", "user_1"),
-                            com.localllm.myapplication.data.WorkflowTemplates.createAIAutoReplyTemplate("user_1"),
-                            com.localllm.myapplication.data.WorkflowTemplates.createTelegramToEmailTemplate("user_1", "user_1")
-                        )
-                        
-                        sampleWorkflows.forEach { workflow: MultiUserWorkflow ->
-                            workflowRepository.saveWorkflow(workflow)
-                        }
-                        
-                        // Refresh the workflows list
-                        workflowRepository.getAllWorkflows().onSuccess { updatedWorkflows: List<Workflow> ->
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                                workflows = updatedWorkflows
-                            }
-                        }
-                    }
+                    // Launch dynamic workflow creation screen
+                    val intent = Intent(context, DynamicWorkflowBuilderActivity::class.java)
+                    context.startActivity(intent)
                 }
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Create Sample Workflows")
+                Text("Create New Workflow")
             }
         }
     } else {
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // Add "Create New Workflow" button at the top
-            Button(
-                onClick = {
-                    // Create a new workflow template
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        val newWorkflow: MultiUserWorkflow = com.localllm.myapplication.data.WorkflowTemplates.createUrgentEmailToTelegramTemplate("user_1", "user_1")
-                        workflowRepository.saveWorkflow(newWorkflow)
-                        
-                        // Refresh the workflows list
-                        workflowRepository.getAllWorkflows().onSuccess { updatedWorkflows: List<Workflow> ->
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-                                workflows = updatedWorkflows
-                            }
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Create New Workflow")
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
             workflows.forEach { workflow ->
                 WorkflowCard(
                     workflow = workflow,
@@ -1035,7 +1074,12 @@ private fun WorkflowsList() {
                     },
                     onEdit = {
                         android.util.Log.d("WorkflowCard", "Edit workflow: ${workflow.name}")
-                        // TODO: Navigate to workflow editor
+                        // Navigate to workflow editor
+                        val intent = Intent(context, DynamicWorkflowBuilderActivity::class.java).apply {
+                            putExtra("workflow_id", workflow.id)
+                            putExtra("edit_mode", true)
+                        }
+                        context.startActivity(intent)
                     },
                     onRun = {
                         android.util.Log.d("WorkflowCard", "Run workflow: ${workflow.name}")
@@ -1043,6 +1087,12 @@ private fun WorkflowsList() {
                         val workflowEngine = AppContainer.provideWorkflowEngine(context)
                         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                             try {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "▶️ Running workflow: ${workflow.name}",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                
                                 val result = workflowEngine.executeWorkflow(
                                     workflowId = workflow.id,
                                     triggerUserId = "user_1",
@@ -1051,13 +1101,34 @@ private fun WorkflowsList() {
                                 result.fold(
                                     onSuccess = { executionResult ->
                                         android.util.Log.i("WorkflowCard", "Workflow executed successfully: ${executionResult.message}")
+                                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "✅ Workflow executed successfully!",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        }
                                     },
                                     onFailure = { error ->
                                         android.util.Log.e("WorkflowCard", "Workflow execution failed: ${error.message}")
+                                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "❌ Workflow failed: ${error.message}",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        }
                                     }
                                 )
                             } catch (e: Exception) {
                                 android.util.Log.e("WorkflowCard", "Error executing workflow", e)
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "❌ Error: ${e.message}",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             }
                         }
                     },
@@ -1127,46 +1198,229 @@ private fun WorkflowCard(
             
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedButton(
+                // Primary Run button - most used action
+                Button(
                     onClick = onRun,
-                    modifier = Modifier.weight(1f),
-                    enabled = workflow.isEnabled
-                ) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Run", style = MaterialTheme.typography.labelMedium)
-                }
-                
-                OutlinedButton(
-                    onClick = { showShareDialog = true },
+                    enabled = workflow.isEnabled,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Share", style = MaterialTheme.typography.labelMedium)
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Run Workflow")
                 }
                 
-                OutlinedButton(
-                    onClick = onEdit,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Edit", style = MaterialTheme.typography.labelMedium)
-                }
+                Spacer(modifier = Modifier.width(8.dp))
                 
-                OutlinedButton(
-                    onClick = onDelete,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Delete", style = MaterialTheme.typography.labelMedium)
+                // Dropdown menu for other actions
+                Box {
+                    var expanded by remember { mutableStateOf(false) }
+                    
+                    IconButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "More options",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Share Workflow")
+                                }
+                            },
+                            onClick = {
+                                showShareDialog = true
+                                expanded = false
+                            }
+                        )
+                        
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Check Gmail Now")
+                                }
+                            },
+                            onClick = {
+                                // Manually check Gmail for this workflow
+                                android.util.Log.d("WorkflowCard", "Manual Gmail check for workflow: ${workflow.name}")
+                                val triggerManager = AppContainer.provideTriggerManager(context)
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    try {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "🔍 Checking Gmail for new emails...",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                        
+                                        val result = triggerManager.checkTriggers()
+                                        result.fold(
+                                            onSuccess = { results ->
+                                                val triggeredCount = results.count { it.triggered }
+                                                val workflowResult = results.find { it.workflowId == workflow.id }
+                                                
+                                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                                    if (triggeredCount > 0) {
+                                                        android.widget.Toast.makeText(
+                                                            context,
+                                                            "✅ Found new emails! Workflow triggered.",
+                                                            android.widget.Toast.LENGTH_LONG
+                                                        ).show()
+                                                    } else {
+                                                        android.widget.Toast.makeText(
+                                                            context,
+                                                            "📧 No new emails found. Result: ${workflowResult?.message ?: "No result"}",
+                                                            android.widget.Toast.LENGTH_LONG
+                                                        ).show()
+                                                    }
+                                                }
+                                            },
+                                            onFailure = { error ->
+                                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "❌ Gmail check failed: ${error.message}",
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            }
+                                        )
+                                    } catch (e: Exception) {
+                                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "❌ Error: ${e.message}",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    }
+                                }
+                                expanded = false
+                            }
+                        )
+                        
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Email, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Test with Fake Email")
+                                }
+                            },
+                            onClick = {
+                                // Test workflow with fake email data
+                                android.util.Log.d("WorkflowCard", "Testing workflow with fake email: ${workflow.name}")
+                                val workflowEngine = AppContainer.provideWorkflowEngine(context)
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    try {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "🧪 Testing workflow with fake email...",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                        
+                                        val fakeEmailData = mapOf(
+                                            "email_from" to "test@example.com",
+                                            "email_subject" to "Test Email for Workflow",
+                                            "email_body" to "This is a test email to trigger your autoreply workflow. Please reply to this message.",
+                                            "trigger_email_id" to "fake_email_${System.currentTimeMillis()}",
+                                            "test_mode" to true
+                                        )
+                                        
+                                        val result = workflowEngine.executeWorkflow(
+                                            workflowId = workflow.id,
+                                            triggerUserId = "user_1",
+                                            triggerData = fakeEmailData
+                                        )
+                                        result.fold(
+                                            onSuccess = { executionResult ->
+                                                android.util.Log.i("WorkflowCard", "Test executed successfully: ${executionResult.message}")
+                                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "✅ Test successful! Check logs for details.",
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            },
+                                            onFailure = { error ->
+                                                android.util.Log.e("WorkflowCard", "Test failed: ${error.message}")
+                                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        "❌ Test failed: ${error.message}",
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    ).show()
+                                                }
+                                            }
+                                        )
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("WorkflowCard", "Test error", e)
+                                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "❌ Test error: ${e.message}",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    }
+                                }
+                                expanded = false
+                            }
+                        )
+                        
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Edit Workflow")
+                                }
+                            },
+                            onClick = {
+                                onEdit()
+                                expanded = false
+                            }
+                        )
+                        
+                        androidx.compose.material3.HorizontalDivider()
+                        
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Delete, 
+                                        contentDescription = null, 
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Delete Workflow",
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            },
+                            onClick = {
+                                onDelete()
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
         }

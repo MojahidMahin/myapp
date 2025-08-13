@@ -3,8 +3,6 @@ package com.localllm.myapplication.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,7 +16,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,6 +35,10 @@ class DynamicWorkflowBuilderActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Get edit mode parameters from intent
+        val workflowId = intent.getStringExtra("workflow_id")
+        val isEditMode = intent.getBooleanExtra("edit_mode", false)
+        
         setContent {
             MyApplicationTheme {
                 DynamicWorkflowBuilderScreen(
@@ -45,7 +46,9 @@ class DynamicWorkflowBuilderActivity : ComponentActivity() {
                     onWorkflowCreated = { 
                         // Show success message and go back
                         finish()
-                    }
+                    },
+                    editWorkflowId = workflowId,
+                    isEditMode = isEditMode
                 )
             }
         }
@@ -56,7 +59,9 @@ class DynamicWorkflowBuilderActivity : ComponentActivity() {
 @Composable
 fun DynamicWorkflowBuilderScreen(
     onBackPressed: () -> Unit,
-    onWorkflowCreated: () -> Unit
+    onWorkflowCreated: () -> Unit,
+    editWorkflowId: String? = null,
+    isEditMode: Boolean = false
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -92,6 +97,100 @@ fun DynamicWorkflowBuilderScreen(
     var selectedTrigger by remember { mutableStateOf<TriggerConfig?>(null) }
     var selectedActions by remember { mutableStateOf<List<ActionConfig>>(emptyList()) }
     var selectedUsers by remember { mutableStateOf<List<WorkflowUser>>(emptyList()) }
+    
+    // Load existing workflow in edit mode
+    LaunchedEffect(editWorkflowId, isEditMode) {
+        if (isEditMode && editWorkflowId != null) {
+            android.util.Log.d("WorkflowBuilder", "Loading workflow for editing: $editWorkflowId")
+            try {
+                workflowRepository.getWorkflowById(editWorkflowId).fold(
+                    onSuccess = { workflow ->
+                        workflow?.let {
+                            android.util.Log.d("WorkflowBuilder", "Found workflow: ${it.name}")
+                            workflowName = it.name
+                            workflowDescription = it.description
+                            
+                            // Convert workflow trigger to TriggerConfig
+                            if (it is MultiUserWorkflow && it.triggers.isNotEmpty()) {
+                                val trigger = it.triggers.first()
+                                selectedTrigger = when (trigger) {
+                                    is MultiUserTrigger.UserGmailNewEmail -> TriggerConfig(
+                                        type = TriggerType.GMAIL_NEW_EMAIL,
+                                        displayName = "New Gmail Email",
+                                        config = mapOf(
+                                            "userId" to trigger.userId,
+                                            "condition" to trigger.condition.toString()
+                                        )
+                                    )
+                                    is MultiUserTrigger.UserTelegramCommand -> TriggerConfig(
+                                        type = TriggerType.TELEGRAM_COMMAND,
+                                        displayName = "Telegram Command",
+                                        config = mapOf(
+                                            "userId" to trigger.userId,
+                                            "command" to trigger.command
+                                        )
+                                    )
+                                    else -> null
+                                }
+                            }
+                            
+                            // Convert workflow actions to ActionConfigs  
+                            selectedActions = (it as? MultiUserWorkflow)?.actions?.mapNotNull { action ->
+                                when (action) {
+                                    is MultiUserAction.AISmartReply -> ActionConfig(
+                                        type = ActionType.AI_GENERATE_REPLY,
+                                        displayName = "AI Generate Reply",
+                                        config = mapOf<String, String>(
+                                            "originalMessage" to (action.originalMessage ?: ""),
+                                            "context" to (action.context ?: ""),
+                                            "tone" to (action.tone ?: "")
+                                        )
+                                    )
+                                    is MultiUserAction.SendToUserGmail -> ActionConfig(
+                                        type = ActionType.SEND_GMAIL,
+                                        displayName = "Send Gmail Email",
+                                        config = mapOf<String, String>(
+                                            "targetUserId" to (action.targetUserId ?: ""),
+                                            "to" to (action.to ?: ""),
+                                            "subject" to (action.subject ?: ""),
+                                            "body" to (action.body ?: "")
+                                        )
+                                    )
+                                    is MultiUserAction.SendToUserTelegram -> ActionConfig(
+                                        type = ActionType.SEND_TELEGRAM,
+                                        displayName = "Send Telegram Message",
+                                        config = mapOf<String, String>(
+                                            "targetUserId" to (action.targetUserId ?: ""),
+                                            "text" to (action.text ?: "")
+                                        )
+                                    )
+                                    is MultiUserAction.ReplyToUserGmail -> ActionConfig(
+                                        type = ActionType.REPLY_GMAIL,
+                                        displayName = "Reply to Gmail",
+                                        config = mapOf<String, String>(
+                                            "targetUserId" to (action.targetUserId ?: ""),
+                                            "originalMessageId" to (action.originalMessageId ?: ""),
+                                            "replyBody" to (action.replyBody ?: "")
+                                        )
+                                    )
+                                    else -> null
+                                }
+                            } ?: emptyList()
+                            
+                            android.util.Log.d("WorkflowBuilder", "Loaded workflow: name=$workflowName, trigger=${selectedTrigger?.type}, actions=${selectedActions.size}")
+                        } ?: run {
+                            android.util.Log.w("WorkflowBuilder", "Workflow not found: $editWorkflowId")
+                        }
+                    },
+                    onFailure = { error ->
+                        android.util.Log.e("WorkflowBuilder", "Failed to load workflow: ${error.message}")
+                    }
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("WorkflowBuilder", "Exception loading workflow", e)
+            }
+        }
+    }
     var showUserPicker by remember { mutableStateOf(false) }
     var showTriggerPicker by remember { mutableStateOf(false) }
     var showActionPicker by remember { mutableStateOf(false) }
@@ -102,7 +201,7 @@ fun DynamicWorkflowBuilderScreen(
         Column {
             // Top App Bar
             TopAppBar(
-                title = { Text("Create Dynamic Workflow") },
+                title = { Text(if (isEditMode) "Edit Workflow" else "Create Dynamic Workflow") },
                 navigationIcon = {
                     IconButton(onClick = onBackPressed) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
@@ -818,8 +917,14 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
     return when (config.type) {
         ActionType.SEND_GMAIL -> MultiUserAction.SendToUserGmail(
             targetUserId = config.config["targetUserId"] ?: users.firstOrNull()?.id ?: "",
+            to = config.config["to"], // Can be null to use target user's email
             subject = config.config["subject"] ?: "Workflow Notification",
             body = config.config["body"] ?: "This is an automated message from your workflow."
+        )
+        ActionType.REPLY_GMAIL -> MultiUserAction.ReplyToUserGmail(
+            targetUserId = config.config["targetUserId"] ?: "user_1", // Default to current user
+            originalMessageId = config.config["originalMessageId"] ?: "{{trigger_email_id}}",
+            replyBody = config.config["body"] ?: "Thank you for your email. This is an automated reply."
         )
         ActionType.SEND_TELEGRAM -> MultiUserAction.SendToUserTelegram(
             targetUserId = config.config["targetUserId"] ?: users.firstOrNull()?.id ?: "",
@@ -1261,6 +1366,7 @@ fun ActionPickerDialog(
                                         actionConfig = actionConfig + (key to value)
                                     },
                                     configFields = listOf(
+                                        "to" to "Recipient email",
                                         "subject" to "Email subject",
                                         "body" to "Email body"
                                     )
@@ -2333,18 +2439,26 @@ data class ActionValidationResult(
 fun validateAction(action: ActionConfig, inputData: Map<String, String>, users: List<WorkflowUser>): ActionValidationResult {
     return when (action.type) {
         ActionType.SEND_GMAIL -> {
+            val to = action.config["to"]
             val subject = action.config["subject"]
             val body = action.config["body"]
+            
             if (subject.isNullOrBlank()) {
                 ActionValidationResult(
                     message = "⚠️ No email subject specified",
                     status = WorkflowTestStatus.WARNING
                 )
+            } else if (to.isNullOrBlank()) {
+                ActionValidationResult(
+                    message = "ℹ️ Will send email \"$subject\" to user's default email",
+                    status = WorkflowTestStatus.SUCCESS,
+                    details = mapOf("subject" to subject, "body" to (body ?: ""), "recipient" to "Default user email")
+                )
             } else {
                 ActionValidationResult(
-                    message = "✓ Will send email: \"$subject\"",
+                    message = "✓ Will send email \"$subject\" to $to",
                     status = WorkflowTestStatus.SUCCESS,
-                    details = mapOf("subject" to subject, "body" to (body ?: ""))
+                    details = mapOf("subject" to subject, "body" to (body ?: ""), "recipient" to to)
                 )
             }
         }
@@ -2518,8 +2632,7 @@ suspend fun saveAsTemplate(
             actionConfigs = actions
         )
         
-        // Save to custom templates (this would integrate with your template storage system)
-        WorkflowTemplates.addCustomTemplate(template)
+        // Templates disabled - workflows are created directly without templates
         
         android.util.Log.d("TemplateCreation", "Created custom template: ${template.name}")
         

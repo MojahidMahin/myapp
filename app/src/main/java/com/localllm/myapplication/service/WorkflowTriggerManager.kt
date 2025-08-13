@@ -56,6 +56,23 @@ class WorkflowTriggerManager(
             // For now, we'll check periodically
             while (isActive) {
                 refreshActiveTriggers()
+                
+                // Actually check triggers for new emails/messages
+                val result = checkTriggers()
+                result.fold(
+                    onSuccess = { results ->
+                        val triggeredCount = results.count { it.triggered }
+                        if (triggeredCount > 0) {
+                            Log.i(TAG, "Triggers processed: $triggeredCount workflows triggered")
+                        } else {
+                            Log.d(TAG, "Triggers checked: ${results.size} workflows, none triggered")
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Error checking triggers: ${error.message}")
+                    }
+                )
+                
                 delay(30000) // Check every 30 seconds
             }
         }
@@ -217,8 +234,11 @@ class WorkflowTriggerManager(
         trigger: MultiUserTrigger.UserGmailNewEmail
     ): TriggerExecutionResult {
         return try {
+            Log.d(TAG, "Checking Gmail trigger for workflow: ${workflow.name}, user: ${trigger.userId}")
+            
             val gmailService = userManager.getGmailService(trigger.userId)
             if (gmailService == null) {
+                Log.w(TAG, "Gmail service not available for user: ${trigger.userId}")
                 return TriggerExecutionResult(
                     workflow.id, 
                     "UserGmailNewEmail", 
@@ -227,14 +247,37 @@ class WorkflowTriggerManager(
                 )
             }
             
-            // Check for new emails based on condition
-            val hasNewEmails = checkGmailCondition(gmailService, trigger.condition)
+            Log.d(TAG, "Gmail service available, checking condition for new emails")
             
-            if (hasNewEmails) {
-                executeWorkflow(workflow, trigger.userId, "Gmail trigger - new email")
-            } else {
-                TriggerExecutionResult(workflow.id, "UserGmailNewEmail", false, "No matching emails found")
-            }
+            // Check for new emails based on condition and get email details
+            val emailsResult = gmailService.checkForNewEmails(trigger.condition, 1)
+            emailsResult.fold(
+                onSuccess = { emails ->
+                    if (emails.isNotEmpty()) {
+                        val latestEmail = emails.first()
+                        Log.i(TAG, "New emails found! Executing workflow: ${workflow.name}")
+                        
+                        // Create trigger data with email details
+                        val triggerData = mapOf(
+                            "source" to "gmail",
+                            "email_from" to latestEmail.from,
+                            "email_subject" to latestEmail.subject,
+                            "email_body" to latestEmail.body,
+                            "trigger_email_id" to latestEmail.id, // For template substitution
+                            "type" to "new_email"
+                        )
+                        
+                        executeWorkflowWithData(workflow, trigger.userId, triggerData)
+                    } else {
+                        Log.d(TAG, "No new emails matching condition for workflow: ${workflow.name}")
+                        TriggerExecutionResult(workflow.id, "UserGmailNewEmail", false, "No matching emails found")
+                    }
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Failed to check emails: ${error.message}")
+                    TriggerExecutionResult(workflow.id, "UserGmailNewEmail", false, "Failed to check emails: ${error.message}")
+                }
+            )
             
         } catch (e: Exception) {
             Log.e(TAG, "Error checking Gmail trigger", e)
@@ -278,6 +321,45 @@ class WorkflowTriggerManager(
     /**
      * Execute workflow from trigger
      */
+    private suspend fun executeWorkflowWithData(
+        workflow: MultiUserWorkflow, 
+        triggerUserId: String, 
+        triggerData: Map<String, String>
+    ): TriggerExecutionResult {
+        return try {
+            val result = workflowEngine.executeWorkflow(workflow.id, triggerUserId, triggerData)
+            
+            result.fold(
+                onSuccess = { executionResult ->
+                    Log.i(TAG, "Workflow ${workflow.id} triggered successfully")
+                    TriggerExecutionResult(
+                        workflow.id, 
+                        "Executed", 
+                        true, 
+                        "Execution ID: ${executionResult.executionId}"
+                    )
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Workflow ${workflow.id} execution failed", error)
+                    TriggerExecutionResult(
+                        workflow.id, 
+                        "ExecutionFailed", 
+                        false, 
+                        "Execution failed: ${error.message}"
+                    )
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error executing workflow ${workflow.id}", e)
+            TriggerExecutionResult(
+                workflow.id, 
+                "ExecutionError", 
+                false, 
+                "Error: ${e.message}"
+            )
+        }
+    }
+    
     private suspend fun executeWorkflow(
         workflow: MultiUserWorkflow, 
         triggerUserId: String, 
@@ -320,9 +402,22 @@ class WorkflowTriggerManager(
         condition: GmailIntegrationService.EmailCondition
     ): Boolean {
         return try {
-            // This would check for new emails based on the condition
-            // For now, return false to avoid excessive API calls during testing
-            false
+            Log.d(TAG, "Checking Gmail condition for new emails")
+            
+            // Check for new emails based on the condition
+            val result = gmailService.checkForNewEmails(condition, 1)
+            val hasNewEmails = result.fold(
+                onSuccess = { emails -> 
+                    Log.d(TAG, "Found ${emails.size} emails matching condition")
+                    emails.isNotEmpty() 
+                },
+                onFailure = { error -> 
+                    Log.w(TAG, "Gmail check failed: ${error.message}")
+                    false 
+                }
+            )
+            
+            hasNewEmails
         } catch (e: Exception) {
             Log.e(TAG, "Error checking Gmail condition", e)
             false

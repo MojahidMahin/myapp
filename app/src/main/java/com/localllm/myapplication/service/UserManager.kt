@@ -292,6 +292,14 @@ class UserManager(private val context: Context) {
     }
     
     /**
+     * Register an authenticated Gmail service for a user
+     */
+    fun registerGmailService(userId: String, service: GmailIntegrationService) {
+        gmailServices[userId] = service
+        Log.d(TAG, "Registered authenticated Gmail service for user: $userId")
+    }
+    
+    /**
      * Get Gmail service for a user
      */
     fun getGmailService(userId: String): GmailIntegrationService? {
@@ -302,6 +310,14 @@ class UserManager(private val context: Context) {
             Log.d(TAG, "Created Gmail service for user: $userId")
             service
         }
+    }
+    
+    /**
+     * Register an authenticated Telegram service for a user
+     */
+    fun registerTelegramService(userId: String, service: TelegramBotService) {
+        telegramServices[userId] = service
+        Log.d(TAG, "Registered authenticated Telegram service for user: $userId")
     }
     
     /**

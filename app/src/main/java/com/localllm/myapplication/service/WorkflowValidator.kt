@@ -39,7 +39,7 @@ class WorkflowValidator(private val context: Context) {
     /**
      * Validate a complete workflow
      */
-    suspend fun validateWorkflow(workflow: MultiUserWorkflow, userManager: UserManager): ValidationResult {
+    suspend fun validateWorkflow(workflow: MultiUserWorkflow, userManager: UserManager, triggerUserId: String? = null): ValidationResult {
         val errors = mutableListOf<ValidationError>()
         val warnings = mutableListOf<ValidationWarning>()
         
@@ -53,7 +53,7 @@ class WorkflowValidator(private val context: Context) {
             validateTriggers(workflow.triggers, errors, warnings)
             
             // Validate actions
-            validateActions(workflow.actions, errors, warnings, userManager)
+            validateActions(workflow.actions, errors, warnings, userManager, triggerUserId)
             
             // Validate permissions
             validatePermissions(workflow, errors, warnings)
@@ -272,18 +272,25 @@ class WorkflowValidator(private val context: Context) {
         actions: List<MultiUserAction>,
         errors: MutableList<ValidationError>,
         warnings: MutableList<ValidationWarning>,
-        userManager: UserManager
+        userManager: UserManager,
+        triggerUserId: String? = null
     ) {
         actions.forEachIndexed { index, action ->
             when (action) {
                 is MultiUserAction.SendToUserGmail -> {
-                    // Validate user existence
-                    val user = userManager.getUserById(action.targetUserId).getOrNull()
+                    // Validate user existence, use triggerUserId as fallback
+                    val effectiveTargetUserId = if (action.targetUserId.isEmpty() && triggerUserId != null) {
+                        triggerUserId
+                    } else {
+                        action.targetUserId
+                    }
+                    
+                    val user = userManager.getUserById(effectiveTargetUserId).getOrNull()
                     if (user == null) {
                         errors.add(
                             ValidationError(
                                 "INVALID_GMAIL_TARGET",
-                                "Gmail action at index $index targets non-existent user: ${action.targetUserId}",
+                                "Gmail action at index $index targets non-existent user: $effectiveTargetUserId",
                                 suggestedFix = "Verify the target user ID exists"
                             )
                         )
@@ -394,8 +401,35 @@ class WorkflowValidator(private val context: Context) {
                     }
                 }
                 
+                is MultiUserAction.ReplyToUserGmail -> {
+                    // Validate user existence for reply action, use triggerUserId as fallback
+                    val effectiveTargetUserId = if (action.targetUserId.isEmpty() && triggerUserId != null) {
+                        triggerUserId
+                    } else {
+                        action.targetUserId
+                    }
+                    
+                    val user = userManager.getUserById(effectiveTargetUserId).getOrNull()
+                    if (user == null) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GMAIL_REPLY_TARGET",
+                                "Gmail reply action at index $index targets non-existent user: $effectiveTargetUserId",
+                                suggestedFix = "Verify the target user ID exists"
+                            )
+                        )
+                    } else if (!user.gmailConnected) {
+                        warnings.add(
+                            ValidationWarning(
+                                "GMAIL_NOT_CONNECTED",
+                                "Gmail reply action at index $index targets user without Gmail connection: $effectiveTargetUserId",
+                                suggestion = "Connect Gmail account for the target user"
+                            )
+                        )
+                    }
+                }
+                
                 // Add missing action types
-                is MultiUserAction.ReplyToUserGmail,
                 is MultiUserAction.ForwardUserGmail,
                 is MultiUserAction.ReplyToUserTelegram,
                 is MultiUserAction.ForwardUserTelegram,

@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(./gradlew:*)",
-      "Bash(.gradlew compileDebugKotlin:*)"
+      "Bash(.gradlew compileDebugKotlin:*)",
+      "Bash(kotlinc:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

@@ -66,7 +66,7 @@ class MultiUserWorkflowEngine(
                 Log.d(TAG, "Found workflow: ${workflow.name} (${workflow.actions.size} actions)")
                 
                 // Validate workflow before execution
-                val validationResult = validator.validateWorkflow(workflow, userManager)
+                val validationResult = validator.validateWorkflow(workflow, userManager, triggerUserId)
                 if (!validationResult.isValid) {
                     val validationSummary = validator.getValidationSummary(validationResult)
                     Log.e(TAG, "Workflow validation failed:\n$validationSummary")
@@ -92,6 +92,15 @@ class MultiUserWorkflowEngine(
                     triggerUserId = triggerUserId,
                     triggerData = triggerData
                 )
+                
+                // Populate variables from trigger data if it's a map
+                if (triggerData is Map<*, *>) {
+                    triggerData.forEach { (key, value) ->
+                        if (key is String && value is String) {
+                            context.variables[key] = value
+                        }
+                    }
+                }
                 
                 _currentExecution.value = context
                 _isExecuting.value = true
@@ -243,18 +252,19 @@ class MultiUserWorkflowEngine(
     
     // Gmail Action Implementations
     private suspend fun executeSendToUserGmail(action: MultiUserAction.SendToUserGmail, context: WorkflowExecutionContext): Result<String> {
-        Log.d(TAG, "Sending Gmail to user: ${action.targetUserId}")
+        val targetUserId = if (action.targetUserId.isEmpty()) context.triggerUserId else action.targetUserId
+        Log.d(TAG, "Sending Gmail to user: $targetUserId")
         
-        val gmailService = userManager.getGmailService(action.targetUserId)
+        val gmailService = userManager.getGmailService(targetUserId)
         if (gmailService == null) {
-            Log.e(TAG, "Gmail service not available for user: ${action.targetUserId}")
-            return Result.failure(Exception("Gmail service not available for user"))
+            Log.e(TAG, "Gmail service not available for user: $targetUserId")
+            return Result.failure(Exception("Gmail service not available for user: $targetUserId"))
         }
         
-        val targetUser = userManager.getUserById(action.targetUserId).getOrNull()
+        val targetUser = userManager.getUserById(targetUserId).getOrNull()
         if (targetUser == null) {
-            Log.e(TAG, "Target user not found: ${action.targetUserId}")
-            return Result.failure(Exception("Target user not found"))
+            Log.e(TAG, "Target user not found: $targetUserId")
+            return Result.failure(Exception("Target user not found: $targetUserId"))
         }
         
         val toEmail = action.to ?: targetUser.email
@@ -268,12 +278,17 @@ class MultiUserWorkflowEngine(
     }
     
     private suspend fun executeReplyToUserGmail(action: MultiUserAction.ReplyToUserGmail, context: WorkflowExecutionContext): Result<String> {
-        val gmailService = userManager.getGmailService(action.targetUserId)
-            ?: return Result.failure(Exception("Gmail service not available for user"))
+        val targetUserId = if (action.targetUserId.isEmpty()) context.triggerUserId else action.targetUserId
+        val gmailService = userManager.getGmailService(targetUserId)
+            ?: return Result.failure(Exception("Gmail service not available for user: $targetUserId"))
         
         val processedBody = replaceVariables(action.replyBody, context.variables)
+        val processedMessageId = replaceVariables(action.originalMessageId, context.variables)
         
-        return gmailService.replyToEmail(action.originalMessageId, processedBody, action.isHtml)
+        Log.d(TAG, "Replying to Gmail with processed message ID: $processedMessageId")
+        Log.d(TAG, "Available variables: ${context.variables}")
+        
+        return gmailService.replyToEmail(processedMessageId, processedBody, action.isHtml)
     }
     
     private suspend fun executeForwardUserGmail(action: MultiUserAction.ForwardUserGmail, context: WorkflowExecutionContext): Result<String> {
