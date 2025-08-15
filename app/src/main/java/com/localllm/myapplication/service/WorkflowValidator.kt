@@ -261,6 +261,111 @@ class WorkflowValidator(private val context: Context) {
                         )
                     }
                 }
+                is MultiUserTrigger.GeofenceEnterTrigger -> {
+                    if (trigger.userId.isBlank()) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GEOFENCE_USER",
+                                "Geofence enter trigger at index $index has invalid user ID",
+                                suggestedFix = "Specify a valid user ID for the geofence trigger"
+                            )
+                        )
+                    }
+                    if (trigger.locationName.isBlank()) {
+                        warnings.add(
+                            ValidationWarning(
+                                "UNNAMED_LOCATION",
+                                "Geofence enter trigger at index $index has no location name",
+                                "Add a descriptive location name"
+                            )
+                        )
+                    }
+                    if (trigger.radiusMeters <= 0) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GEOFENCE_RADIUS",
+                                "Geofence enter trigger at index $index has invalid radius: ${trigger.radiusMeters}",
+                                suggestedFix = "Set a positive radius value (recommended: 50-500 meters)"
+                            )
+                        )
+                    }
+                }
+                is MultiUserTrigger.GeofenceExitTrigger -> {
+                    if (trigger.userId.isBlank()) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GEOFENCE_USER",
+                                "Geofence exit trigger at index $index has invalid user ID",
+                                suggestedFix = "Specify a valid user ID for the geofence trigger"
+                            )
+                        )
+                    }
+                    if (trigger.locationName.isBlank()) {
+                        warnings.add(
+                            ValidationWarning(
+                                "UNNAMED_LOCATION",
+                                "Geofence exit trigger at index $index has no location name",
+                                "Add a descriptive location name"
+                            )
+                        )
+                    }
+                    if (trigger.radiusMeters <= 0) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GEOFENCE_RADIUS",
+                                "Geofence exit trigger at index $index has invalid radius: ${trigger.radiusMeters}",
+                                suggestedFix = "Set a positive radius value (recommended: 50-500 meters)"
+                            )
+                        )
+                    }
+                }
+                is MultiUserTrigger.GeofenceDwellTrigger -> {
+                    if (trigger.userId.isBlank()) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GEOFENCE_USER",
+                                "Geofence dwell trigger at index $index has invalid user ID",
+                                suggestedFix = "Specify a valid user ID for the geofence trigger"
+                            )
+                        )
+                    }
+                    if (trigger.locationName.isBlank()) {
+                        warnings.add(
+                            ValidationWarning(
+                                "UNNAMED_LOCATION",
+                                "Geofence dwell trigger at index $index has no location name",
+                                "Add a descriptive location name"
+                            )
+                        )
+                    }
+                    if (trigger.radiusMeters <= 0) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_GEOFENCE_RADIUS",
+                                "Geofence dwell trigger at index $index has invalid radius: ${trigger.radiusMeters}",
+                                suggestedFix = "Set a positive radius value (recommended: 50-500 meters)"
+                            )
+                        )
+                    }
+                    if (trigger.dwellTimeMillis <= 0) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_DWELL_TIME",
+                                "Geofence dwell trigger at index $index has invalid dwell time: ${trigger.dwellTimeMillis}ms",
+                                suggestedFix = "Set a positive dwell time (recommended: 60000-1800000ms / 1-30 minutes)"
+                            )
+                        )
+                    }
+                }
+                else -> {
+                    warnings.add(
+                        ValidationWarning(
+                            "UNKNOWN_TRIGGER_TYPE",
+                            "Unknown trigger type at index $index: ${trigger::class.simpleName}",
+                            "This trigger type may not be supported"
+                        )
+                    )
+                }
             }
         }
     }

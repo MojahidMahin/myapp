@@ -137,6 +137,38 @@ sealed class MultiUserTrigger {
         val name: String,
         val allowedUsers: List<String> = emptyList()
     ) : MultiUserTrigger()
+    
+    // Geofencing Triggers
+    data class GeofenceEnterTrigger(
+        val userId: String,
+        val geofenceId: String,
+        val locationName: String,
+        val latitude: Double,
+        val longitude: Double,
+        val radiusMeters: Float,
+        val placeId: String? = null // Google Places API place ID
+    ) : MultiUserTrigger()
+    
+    data class GeofenceExitTrigger(
+        val userId: String,
+        val geofenceId: String,
+        val locationName: String,
+        val latitude: Double,
+        val longitude: Double,
+        val radiusMeters: Float,
+        val placeId: String? = null
+    ) : MultiUserTrigger()
+    
+    data class GeofenceDwellTrigger(
+        val userId: String,
+        val geofenceId: String,
+        val locationName: String,
+        val latitude: Double,
+        val longitude: Double,
+        val radiusMeters: Float,
+        val dwellTimeMillis: Long = 300000, // 5 minutes default
+        val placeId: String? = null
+    ) : MultiUserTrigger()
 }
 
 /**

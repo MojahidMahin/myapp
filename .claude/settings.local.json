@@ -10,7 +10,8 @@
       "WebFetch(domain:github.com)",
       "Bash(gradlew.bat clean:*)",
       "Bash(adb:*)",
-      "Bash(gradlew.bat compileDebugKotlin:*)"
+      "Bash(gradlew.bat compileDebugKotlin:*)",
+      "Bash(.gradlew.bat compileDebugKotlin)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

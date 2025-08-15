@@ -1,8 +1,13 @@
 package com.localllm.myapplication.ui
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
+import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.google.android.gms.maps.model.LatLng
 import com.localllm.myapplication.data.*
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.service.integration.GmailIntegrationService
@@ -779,7 +785,10 @@ enum class TriggerType {
     TELEGRAM_COMMAND,
     TELEGRAM_FROM_USER,
     SCHEDULED_TIME,
-    MANUAL_TRIGGER
+    MANUAL_TRIGGER,
+    GEOFENCE_ENTER,
+    GEOFENCE_EXIT,
+    GEOFENCE_DWELL
 }
 
 enum class ActionType {
@@ -909,6 +918,34 @@ fun convertTriggerConfig(config: TriggerConfig, userId: String): MultiUserTrigge
         TriggerType.MANUAL_TRIGGER -> MultiUserTrigger.ManualTrigger(
             name = config.config["name"] ?: "Manual Trigger"
         )
+        TriggerType.GEOFENCE_ENTER -> MultiUserTrigger.GeofenceEnterTrigger(
+            userId = userId,
+            geofenceId = config.config["geofenceId"] ?: "",
+            locationName = config.config["locationName"] ?: "Unknown Location",
+            latitude = config.config["latitude"]?.toDoubleOrNull() ?: 0.0,
+            longitude = config.config["longitude"]?.toDoubleOrNull() ?: 0.0,
+            radiusMeters = config.config["radiusMeters"]?.toFloatOrNull() ?: 100f,
+            placeId = config.config["placeId"]
+        )
+        TriggerType.GEOFENCE_EXIT -> MultiUserTrigger.GeofenceExitTrigger(
+            userId = userId,
+            geofenceId = config.config["geofenceId"] ?: "",
+            locationName = config.config["locationName"] ?: "Unknown Location",
+            latitude = config.config["latitude"]?.toDoubleOrNull() ?: 0.0,
+            longitude = config.config["longitude"]?.toDoubleOrNull() ?: 0.0,
+            radiusMeters = config.config["radiusMeters"]?.toFloatOrNull() ?: 100f,
+            placeId = config.config["placeId"]
+        )
+        TriggerType.GEOFENCE_DWELL -> MultiUserTrigger.GeofenceDwellTrigger(
+            userId = userId,
+            geofenceId = config.config["geofenceId"] ?: "",
+            locationName = config.config["locationName"] ?: "Unknown Location",
+            latitude = config.config["latitude"]?.toDoubleOrNull() ?: 0.0,
+            longitude = config.config["longitude"]?.toDoubleOrNull() ?: 0.0,
+            radiusMeters = config.config["radiusMeters"]?.toFloatOrNull() ?: 100f,
+            dwellTimeMillis = config.config["dwellTimeMillis"]?.toLongOrNull() ?: 300000L,
+            placeId = config.config["placeId"]
+        )
         else -> MultiUserTrigger.ManualTrigger(name = "Default")
     }
 }
@@ -967,7 +1004,7 @@ fun TriggerPickerDialog(
     var selectedCategory by remember { mutableStateOf("Gmail") }
     var triggerConfig by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     
-    val categories = listOf("Gmail", "Telegram", "Schedule", "Manual")
+    val categories = listOf("Gmail", "Telegram", "Schedule", "Location", "Manual")
     
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1175,6 +1212,60 @@ fun TriggerPickerDialog(
                                         "minute" to "Minute (0-59)",
                                         "dayOfWeek" to "Day (1=Monday, 7=Sunday)"
                                     )
+                                )
+                            }
+                        }
+                        "Location" -> {
+                            item {
+                                LocationTriggerCard(
+                                    title = "Entering Location",
+                                    description = "Triggers when you enter a specific location",
+                                    icon = "📍",
+                                    triggerType = TriggerType.GEOFENCE_ENTER,
+                                    currentConfig = triggerConfig,
+                                    onLocationSelected = { config ->
+                                        triggerConfig = config
+                                        onTriggerSelected(TriggerConfig(
+                                            type = TriggerType.GEOFENCE_ENTER,
+                                            displayName = "Enter: ${config["locationName"] ?: "Selected Location"}",
+                                            config = config
+                                        ))
+                                    }
+                                )
+                            }
+                            item {
+                                LocationTriggerCard(
+                                    title = "Leaving Location",
+                                    description = "Triggers when you leave a specific location",
+                                    icon = "🚪",
+                                    triggerType = TriggerType.GEOFENCE_EXIT,
+                                    currentConfig = triggerConfig,
+                                    onLocationSelected = { config ->
+                                        triggerConfig = config
+                                        onTriggerSelected(TriggerConfig(
+                                            type = TriggerType.GEOFENCE_EXIT,
+                                            displayName = "Exit: ${config["locationName"] ?: "Selected Location"}",
+                                            config = config
+                                        ))
+                                    }
+                                )
+                            }
+                            item {
+                                LocationTriggerCard(
+                                    title = "Staying at Location",
+                                    description = "Triggers when you stay at a location for some time",
+                                    icon = "⏱️",
+                                    triggerType = TriggerType.GEOFENCE_DWELL,
+                                    currentConfig = triggerConfig,
+                                    onLocationSelected = { config ->
+                                        triggerConfig = config
+                                        onTriggerSelected(TriggerConfig(
+                                            type = TriggerType.GEOFENCE_DWELL,
+                                            displayName = "Dwell: ${config["locationName"] ?: "Selected Location"}",
+                                            config = config
+                                        ))
+                                    },
+                                    showDwellTime = true
                                 )
                             }
                         }
@@ -1973,6 +2064,7 @@ fun TriggerPreview(trigger: TriggerConfig) {
                 TriggerType.TELEGRAM_NEW_MESSAGE, TriggerType.TELEGRAM_COMMAND, TriggerType.TELEGRAM_FROM_USER -> "✈️"
                 TriggerType.SCHEDULED_TIME -> "⏰"
                 TriggerType.MANUAL_TRIGGER -> "🎯"
+                TriggerType.GEOFENCE_ENTER, TriggerType.GEOFENCE_EXIT, TriggerType.GEOFENCE_DWELL -> "📍"
             }
             
             Text(
@@ -1997,6 +2089,9 @@ fun TriggerPreview(trigger: TriggerConfig) {
                         TriggerType.TELEGRAM_FROM_USER -> "Watches for messages from specific user"
                         TriggerType.SCHEDULED_TIME -> "Runs on schedule"
                         TriggerType.MANUAL_TRIGGER -> "Run manually when needed"
+                        TriggerType.GEOFENCE_ENTER -> "Triggers when entering a location"
+                        TriggerType.GEOFENCE_EXIT -> "Triggers when leaving a location"
+                        TriggerType.GEOFENCE_DWELL -> "Triggers when staying at a location"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -2419,6 +2514,95 @@ fun validateTrigger(trigger: TriggerConfig, userId: String): WorkflowTestResult 
                 status = WorkflowTestStatus.SUCCESS
             )
         }
+        TriggerType.GEOFENCE_ENTER -> {
+            val locationName = trigger.config["locationName"]
+            val lat = trigger.config["latitude"]?.toDoubleOrNull()
+            val lng = trigger.config["longitude"]?.toDoubleOrNull()
+            val radius = trigger.config["radiusMeters"]?.toFloatOrNull()
+            
+            when {
+                locationName.isNullOrBlank() -> WorkflowTestResult(
+                    stepName = "Location Enter Trigger",
+                    message = "⚠️ No location name specified.",
+                    status = WorkflowTestStatus.WARNING
+                )
+                lat == null || lng == null -> WorkflowTestResult(
+                    stepName = "Location Enter Trigger",
+                    message = "❌ Invalid coordinates specified.",
+                    status = WorkflowTestStatus.FAILED
+                )
+                radius == null || radius <= 0 -> WorkflowTestResult(
+                    stepName = "Location Enter Trigger",
+                    message = "⚠️ Invalid or missing radius. Using default 100m.",
+                    status = WorkflowTestStatus.WARNING
+                )
+                else -> WorkflowTestResult(
+                    stepName = "Location Enter Trigger",
+                    message = "✓ Will trigger when entering '$locationName' (${radius}m radius)",
+                    status = WorkflowTestStatus.SUCCESS
+                )
+            }
+        }
+        TriggerType.GEOFENCE_EXIT -> {
+            val locationName = trigger.config["locationName"]
+            val lat = trigger.config["latitude"]?.toDoubleOrNull()
+            val lng = trigger.config["longitude"]?.toDoubleOrNull()
+            val radius = trigger.config["radiusMeters"]?.toFloatOrNull()
+            
+            when {
+                locationName.isNullOrBlank() -> WorkflowTestResult(
+                    stepName = "Location Exit Trigger",
+                    message = "⚠️ No location name specified.",
+                    status = WorkflowTestStatus.WARNING
+                )
+                lat == null || lng == null -> WorkflowTestResult(
+                    stepName = "Location Exit Trigger",
+                    message = "❌ Invalid coordinates specified.",
+                    status = WorkflowTestStatus.FAILED
+                )
+                radius == null || radius <= 0 -> WorkflowTestResult(
+                    stepName = "Location Exit Trigger",
+                    message = "⚠️ Invalid or missing radius. Using default 100m.",
+                    status = WorkflowTestStatus.WARNING
+                )
+                else -> WorkflowTestResult(
+                    stepName = "Location Exit Trigger",
+                    message = "✓ Will trigger when leaving '$locationName' (${radius}m radius)",
+                    status = WorkflowTestStatus.SUCCESS
+                )
+            }
+        }
+        TriggerType.GEOFENCE_DWELL -> {
+            val locationName = trigger.config["locationName"]
+            val lat = trigger.config["latitude"]?.toDoubleOrNull()
+            val lng = trigger.config["longitude"]?.toDoubleOrNull()
+            val radius = trigger.config["radiusMeters"]?.toFloatOrNull()
+            val dwellTime = trigger.config["dwellTimeMillis"]?.toLongOrNull() ?: 300000L
+            val dwellMinutes = dwellTime / 60000
+            
+            when {
+                locationName.isNullOrBlank() -> WorkflowTestResult(
+                    stepName = "Location Dwell Trigger",
+                    message = "⚠️ No location name specified.",
+                    status = WorkflowTestStatus.WARNING
+                )
+                lat == null || lng == null -> WorkflowTestResult(
+                    stepName = "Location Dwell Trigger",
+                    message = "❌ Invalid coordinates specified.",
+                    status = WorkflowTestStatus.FAILED
+                )
+                radius == null || radius <= 0 -> WorkflowTestResult(
+                    stepName = "Location Dwell Trigger",
+                    message = "⚠️ Invalid or missing radius. Using default 100m.",
+                    status = WorkflowTestStatus.WARNING
+                )
+                else -> WorkflowTestResult(
+                    stepName = "Location Dwell Trigger",
+                    message = "✓ Will trigger when staying at '$locationName' for ${dwellMinutes}min (${radius}m radius)",
+                    status = WorkflowTestStatus.SUCCESS
+                )
+            }
+        }
         else -> {
             WorkflowTestResult(
                 stepName = "Unknown Trigger",
@@ -2559,6 +2743,47 @@ fun generateSampleTriggerData(trigger: TriggerConfig): Map<String, String> {
                 "trigger_name" to (trigger.config["name"] ?: "Manual Trigger")
             )
         }
+        TriggerType.GEOFENCE_ENTER -> {
+            val locationName = trigger.config["locationName"] ?: "Test Location"
+            mapOf(
+                "trigger_content" to "Location trigger activated",
+                "geofence_id" to "test_geofence_123",
+                "transition_type" to "entered",
+                "location_name" to locationName,
+                "latitude" to (trigger.config["latitude"] ?: "37.7749"),
+                "longitude" to (trigger.config["longitude"] ?: "-122.4194"),
+                "timestamp" to System.currentTimeMillis().toString(),
+                "type" to "location_trigger"
+            )
+        }
+        TriggerType.GEOFENCE_EXIT -> {
+            val locationName = trigger.config["locationName"] ?: "Test Location"
+            mapOf(
+                "trigger_content" to "Location trigger activated",
+                "geofence_id" to "test_geofence_123",
+                "transition_type" to "exited",
+                "location_name" to locationName,
+                "latitude" to (trigger.config["latitude"] ?: "37.7749"),
+                "longitude" to (trigger.config["longitude"] ?: "-122.4194"),
+                "timestamp" to System.currentTimeMillis().toString(),
+                "type" to "location_trigger"
+            )
+        }
+        TriggerType.GEOFENCE_DWELL -> {
+            val locationName = trigger.config["locationName"] ?: "Test Location"
+            val dwellTime = trigger.config["dwellTimeMillis"] ?: "300000"
+            mapOf(
+                "trigger_content" to "Location trigger activated",
+                "geofence_id" to "test_geofence_123",
+                "transition_type" to "dwelling_in",
+                "location_name" to locationName,
+                "latitude" to (trigger.config["latitude"] ?: "37.7749"),
+                "longitude" to (trigger.config["longitude"] ?: "-122.4194"),
+                "dwell_time_ms" to dwellTime,
+                "timestamp" to System.currentTimeMillis().toString(),
+                "type" to "location_trigger"
+            )
+        }
         else -> {
             mapOf("trigger_content" to "Unknown trigger data")
         }
@@ -2683,6 +2908,7 @@ fun generateTemplateTags(trigger: TriggerConfig, actions: List<ActionConfig>): L
         }
         TriggerType.SCHEDULED_TIME -> tags.add("Scheduled")
         TriggerType.MANUAL_TRIGGER -> tags.add("Manual")
+        TriggerType.GEOFENCE_ENTER, TriggerType.GEOFENCE_EXIT, TriggerType.GEOFENCE_DWELL -> tags.add("Location")
     }
     
     // Add action-based tags
@@ -2724,6 +2950,215 @@ enum class WorkflowPlatform(val displayName: String) {
 }
 
 // Mock template storage (replace with actual implementation)
+/**
+ * Location trigger card with map-based location selection
+ */
+@Composable
+fun LocationTriggerCard(
+    title: String,
+    description: String,
+    icon: String,
+    triggerType: TriggerType,
+    currentConfig: Map<String, String>,
+    onLocationSelected: (Map<String, String>) -> Unit,
+    showDwellTime: Boolean = false
+) {
+    val context = LocalContext.current
+    var showConfig by remember { mutableStateOf(false) }
+    var dwellTimeText by remember { mutableStateOf(currentConfig["dwellTimeMillis"]?.let { (it.toLong() / 60000).toString() } ?: "5") }
+    
+    // Location selector launcher
+    val locationSelectorLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.getParcelableExtra<LocationSelection>("selected_location")?.let { selection ->
+                val config = mapOf(
+                    "locationName" to selection.locationName,
+                    "latitude" to selection.latitude.toString(),
+                    "longitude" to selection.longitude.toString(),
+                    "radiusMeters" to selection.radiusMeters.toString(),
+                    "geofenceId" to "${triggerType}_${System.currentTimeMillis()}"
+                ) + if (showDwellTime) {
+                    mapOf("dwellTimeMillis" to (dwellTimeText.toIntOrNull()?.times(60000) ?: 300000).toString())
+                } else emptyMap()
+                
+                onLocationSelected(config)
+                showConfig = false
+            }
+        }
+    }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { showConfig = !showConfig }
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = icon,
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(end = 12.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    // Show current location if selected
+                    if (currentConfig["locationName"]?.isNotEmpty() == true) {
+                        Text(
+                            text = "📍 ${currentConfig["locationName"]} (${currentConfig["radiusMeters"] ?: "100"}m radius)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                }
+                
+                Icon(
+                    if (showConfig) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            if (showConfig) {
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Map selection button
+                Button(
+                    onClick = {
+                        val intent = Intent(context, LocationSelectorActivity::class.java)
+                        
+                        // Pass current location if available
+                        currentConfig["latitude"]?.toDoubleOrNull()?.let { lat ->
+                            currentConfig["longitude"]?.toDoubleOrNull()?.let { lng ->
+                                intent.putExtra("initial_location", LatLng(lat, lng))
+                            }
+                        }
+                        
+                        // Pass current radius
+                        currentConfig["radiusMeters"]?.toFloatOrNull()?.let { radius ->
+                            intent.putExtra("initial_radius", radius)
+                        }
+                        
+                        locationSelectorLauncher.launch(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.LocationOn, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(if (currentConfig["locationName"]?.isNotEmpty() == true) "Change Location" else "Select Location on Map")
+                }
+                
+                // Show current selection details
+                if (currentConfig["locationName"]?.isNotEmpty() == true) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = "Selected Location:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = currentConfig["locationName"] ?: "",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Radius: ${currentConfig["radiusMeters"] ?: "100"}m",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                
+                // Dwell time setting for dwell triggers
+                if (showDwellTime) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Stay duration:",
+                            modifier = Modifier.width(100.dp),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        
+                        OutlinedTextField(
+                            value = dwellTimeText,
+                            onValueChange = { newValue ->
+                                dwellTimeText = newValue
+                            },
+                            modifier = Modifier.width(80.dp),
+                            singleLine = true,
+                            suffix = { Text("min") }
+                        )
+                        
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        // Preset duration buttons
+                        Row {
+                            listOf(1, 5, 15, 30).forEach { preset ->
+                                FilterChip(
+                                    onClick = { dwellTimeText = preset.toString() },
+                                    label = { Text("${preset}m") },
+                                    selected = dwellTimeText == preset.toString(),
+                                    modifier = Modifier.padding(horizontal = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Button(
+                    onClick = {
+                        if (currentConfig["locationName"]?.isNotEmpty() == true) {
+                            val config = currentConfig + if (showDwellTime) {
+                                mapOf("dwellTimeMillis" to (dwellTimeText.toIntOrNull()?.times(60000) ?: 300000).toString())
+                            } else emptyMap()
+                            onLocationSelected(config)
+                        }
+                    },
+                    enabled = currentConfig["locationName"]?.isNotEmpty() == true,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Confirm Trigger")
+                }
+            }
+        }
+    }
+}
+
+// LocationSelection is defined in LocationSelectorActivity.kt
+
 object WorkflowTemplates {
     private val customTemplates = mutableListOf<WorkflowTemplate>()
     

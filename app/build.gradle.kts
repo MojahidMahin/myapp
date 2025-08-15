@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     kotlin("kapt")
+    id("kotlin-parcelize")
 }
 
 android {
@@ -121,6 +122,11 @@ dependencies {
     
     // Google ML Kit for OCR (text recognition)
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    
+    // Google Play Services for location and geofencing
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+    implementation("com.google.android.gms:play-services-maps:18.2.0")
+    implementation("com.google.android.libraries.places:places:3.2.0")
     
     // Additional dependencies for new AI features
     implementation("com.google.code.gson:gson:2.10.1")

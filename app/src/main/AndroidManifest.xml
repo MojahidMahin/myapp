@@ -76,6 +76,11 @@
         android:theme="@style/Theme.MyApplication"
         android:largeHeap="true"
         android:hardwareAccelerated="true">
+
+        <!-- Google Maps API Key -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyBLbIgF7F8f8hjHHR0SqYrFenuUNoS9gb0" />
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
@@ -113,7 +118,8 @@
             android:name=".service.workflow.WorkflowPersistenceService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            tools:ignore="MissingClass" />
 
         <!-- WorkManager System Foreground Service -->
         <service
@@ -168,6 +174,18 @@
             android:exported="false"
             android:label="Workflow Debug Center"
             android:theme="@style/Theme.MyApplication" />
+
+        <activity
+            android:name=".ui.LocationSelectorActivity"
+            android:exported="false"
+            android:label="Select Location"
+            android:theme="@style/Theme.MyApplication" />
+
+        <!-- Geofence Broadcast Receiver -->
+        <receiver
+            android:name=".service.GeofenceBroadcastReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
     </application>
 

@@ -224,6 +224,12 @@ class WorkflowTriggerManager(
                     // Manual triggers are not checked automatically
                     TriggerExecutionResult(workflow.id, trigger::class.simpleName ?: "Manual", false)
                 }
+                // Geofencing triggers are handled by GeofencingService, not checked periodically
+                is MultiUserTrigger.GeofenceEnterTrigger,
+                is MultiUserTrigger.GeofenceExitTrigger,
+                is MultiUserTrigger.GeofenceDwellTrigger -> {
+                    TriggerExecutionResult(workflow.id, trigger::class.simpleName ?: "Geofence", false, "Geofence triggers are event-based")
+                }
                 else -> TriggerExecutionResult(workflow.id, trigger::class.simpleName ?: "Unknown", false)
             }
         } catch (e: Exception) {
