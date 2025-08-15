@@ -30,11 +30,12 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "21"
+        freeCompilerArgs += listOf("-Xjvm-default=all")
     }
     buildFeatures {
         compose = true
@@ -64,6 +65,9 @@ android {
             excludes += "META-INF/notice.txt"
             excludes += "META-INF/ASL2.0"
             excludes += "META-INF/*.kotlin_module"
+        }
+        jniLibs {
+            useLegacyPackaging = true
         }
     }
 }
@@ -133,14 +137,6 @@ dependencies {
     implementation("com.google.http-client:google-http-client-gson:1.43.3")
     implementation("com.google.api-client:google-api-client-gson:2.2.0")
     
-    // HTTP client for Telegram Bot API
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    
-    // JSON handling for API responses
-    implementation("org.json:json:20230618")
-    
-    // Note: activity-result is included in activity-compose, no separate dependency needed
-    
     // Room database
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
@@ -149,17 +145,14 @@ dependencies {
     // JavaMail for Gmail integration  
     implementation("javax.mail:mail:1.4.7")
     
-    // OkHttp for Telegram API
+    // HTTP clients - consolidated
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.squareup.retrofit2:retrofit:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     
     // JSON parsing
     implementation("org.json:json:20240303")
-
-    // by mazenul
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")          // or your version
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")       // or your version
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0") // or your version
 
 
 }

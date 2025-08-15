@@ -75,8 +75,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication"
         android:largeHeap="true"
-        android:hardwareAccelerated="true"
-        android:extractNativeLibs="true">
+        android:hardwareAccelerated="true">
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

@@ -4,7 +4,11 @@
       "Bash(./gradlew:*)",
       "Bash(.gradlew compileDebugKotlin:*)",
       "Bash(kotlinc:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(java:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(gradlew.bat clean:*)"
     ],
     "deny": []
   }

@@ -92,3 +92,27 @@ interface WorkflowExecutionDao {
     @Query("SELECT COUNT(*) FROM workflow_executions WHERE workflowId = :workflowId AND success = 0")
     suspend fun getFailedExecutionCount(workflowId: String): Int
 }
+
+@Dao
+interface ProcessedEmailDao {
+    @Query("SELECT * FROM processed_emails WHERE emailId = :emailId AND workflowId = :workflowId")
+    suspend fun isEmailProcessed(emailId: String, workflowId: String): ProcessedEmailEntity?
+    
+    @Query("SELECT * FROM processed_emails WHERE workflowId = :workflowId ORDER BY processedAt DESC LIMIT :limit")
+    suspend fun getProcessedEmails(workflowId: String, limit: Int): List<ProcessedEmailEntity>
+    
+    @Query("SELECT * FROM processed_emails WHERE userId = :userId AND workflowId = :workflowId ORDER BY processedAt DESC")
+    suspend fun getProcessedEmailsByUser(userId: String, workflowId: String): List<ProcessedEmailEntity>
+    
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProcessedEmail(email: ProcessedEmailEntity)
+    
+    @Query("DELETE FROM processed_emails WHERE processedAt < :cutoffTime")
+    suspend fun deleteOldProcessedEmails(cutoffTime: Long)
+    
+    @Query("DELETE FROM processed_emails WHERE workflowId = :workflowId")
+    suspend fun deleteProcessedEmailsForWorkflow(workflowId: String)
+    
+    @Query("SELECT COUNT(*) FROM processed_emails WHERE workflowId = :workflowId")
+    suspend fun getProcessedEmailCount(workflowId: String): Int
+}

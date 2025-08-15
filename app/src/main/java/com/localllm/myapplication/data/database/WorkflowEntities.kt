@@ -195,3 +195,14 @@ fun WorkflowExecutionResult.toEntity(): WorkflowExecutionEntity {
         timestamp = timestamp
     )
 }
+
+@Entity(tableName = "processed_emails")
+data class ProcessedEmailEntity(
+    @PrimaryKey val emailId: String,
+    val workflowId: String,
+    val userId: String,
+    val emailFrom: String,
+    val emailSubject: String,
+    val processedAt: Long = System.currentTimeMillis(),
+    val triggerTimestamp: Long // When the email was originally received
+)

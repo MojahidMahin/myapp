@@ -56,7 +56,9 @@ class GmailIntegrationService(private val context: Context) {
         val subjectFilter: String? = null,
         val bodyFilter: String? = null,
         val labelFilter: String? = null,
-        val isUnreadOnly: Boolean = true
+        val isUnreadOnly: Boolean = true,
+        val newerThan: Long? = null, // Only get emails newer than this timestamp
+        val maxAgeHours: Int = 24 // Only process emails from last 24 hours by default
     )
     
     /**
@@ -166,8 +168,17 @@ class GmailIntegrationService(private val context: Context) {
                 condition.bodyFilter?.let { queryBuilder.add("$it") }
                 condition.labelFilter?.let { queryBuilder.add("label:$it") }
                 
+                // Add time-based filtering
+                val cutoffTime = condition.newerThan ?: (System.currentTimeMillis() - (condition.maxAgeHours * 60 * 60 * 1000))
+                val cutoffSeconds = cutoffTime / 1000
+                queryBuilder.add("after:$cutoffSeconds")
+                
                 val query = queryBuilder.joinToString(" ")
-                Log.d(TAG, "Searching emails with query: $query")
+                Log.d(TAG, "=== GMAIL API CALL ===")
+                Log.d(TAG, "Query: '$query'")
+                Log.d(TAG, "Limit: $limit")
+                Log.d(TAG, "Condition: isUnreadOnly=${condition.isUnreadOnly}, fromFilter=${condition.fromFilter}, maxAgeHours=${condition.maxAgeHours}")
+                Log.d(TAG, "Cutoff time: $cutoffTime (${java.util.Date(cutoffTime)})")
                 
                 // Get message list
                 val request = service.users().messages().list("me")
@@ -176,15 +187,28 @@ class GmailIntegrationService(private val context: Context) {
                 }
                 request.maxResults = limit.toLong()
                 
+                val startTime = System.currentTimeMillis()
                 val response: ListMessagesResponse = request.execute()
+                val apiTime = System.currentTimeMillis() - startTime
+                
                 val messages = response.messages ?: emptyList()
                 
-                Log.d(TAG, "Found ${messages.size} matching messages")
+                Log.d(TAG, "Gmail API response time: ${apiTime}ms")
+                Log.d(TAG, "Found ${messages.size} matching message references")
                 
                 // Get full message details
-                val emailMessages = messages.map { messageRef ->
+                val emailMessages = messages.mapIndexed { index, messageRef ->
+                    Log.d(TAG, "Fetching email ${index + 1}/${messages.size}: ${messageRef.id}")
                     val fullMessage = service.users().messages().get("me", messageRef.id).execute()
-                    parseEmailMessage(fullMessage)
+                    val parsed = parseEmailMessage(fullMessage)
+                    Log.d(TAG, "Email ${messageRef.id}: from=${parsed.from}, subject='${parsed.subject}', timestamp=${parsed.timestamp}, isRead=${parsed.isRead}")
+                    parsed
+                }
+                
+                Log.d(TAG, "=== GMAIL API RESULT ===")
+                Log.d(TAG, "Successfully fetched ${emailMessages.size} emails")
+                emailMessages.forEach { email ->
+                    Log.d(TAG, "  ${email.id}: '${email.subject}' from ${email.from} (read: ${email.isRead})")
                 }
                 
                 Result.success(emailMessages)

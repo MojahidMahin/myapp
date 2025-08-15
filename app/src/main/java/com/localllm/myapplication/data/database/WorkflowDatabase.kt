@@ -9,15 +9,17 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     entities = [
         WorkflowUserEntity::class,
         WorkflowEntity::class,
-        WorkflowExecutionEntity::class
+        WorkflowExecutionEntity::class,
+        ProcessedEmailEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class WorkflowDatabase : RoomDatabase() {
     abstract fun workflowUserDao(): WorkflowUserDao
     abstract fun workflowDao(): WorkflowDao
     abstract fun workflowExecutionDao(): WorkflowExecutionDao
+    abstract fun processedEmailDao(): ProcessedEmailDao
     
     companion object {
         @Volatile

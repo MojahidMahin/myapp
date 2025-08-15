@@ -1,12 +1,14 @@
 package com.localllm.myapplication.ui
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.BackgroundServiceManager
@@ -17,6 +19,27 @@ class MainActivity : ComponentActivity() {
     private val authViewModel by lazy { AppContainer.provideAuthViewModel(this) }
     private val backgroundServiceManager by lazy { AppContainer.provideBackgroundServiceManager(this) }
     private val permissionManager by lazy { AppContainer.providePermissionManager(this) }
+    
+    private val signInResultLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        authViewModel.handleSignInResult(result.data)
+    }
+    
+    private val changeEmailResultLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        authViewModel.handleChangeEmailResult(result.data)
+    }
+    
+    private val permissionRequestLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        // Convert the result map to arrays for compatibility with existing code
+        val permissionArray = permissions.keys.toTypedArray()
+        val grantResults = permissions.values.map { if (it) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED }.toIntArray()
+        permissionManager.handleRequestPermissionsResult(0, permissionArray, grantResults)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,7 +104,21 @@ class MainActivity : ComponentActivity() {
         }, 3000) // Delay to avoid startup interference
     }
 
+    fun launchSignInActivity(intent: Intent) {
+        signInResultLauncher.launch(intent)
+    }
+    
+    fun launchChangeEmailActivity(intent: Intent) {
+        changeEmailResultLauncher.launch(intent)
+    }
+    
+    fun requestPermissions(permissions: Array<String>) {
+        permissionRequestLauncher.launch(permissions)
+    }
+
+    @Deprecated("Use launchSignInActivity() or launchChangeEmailActivity() instead")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
             9001 -> authViewModel.handleSignInResult(data)
@@ -90,11 +127,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Deprecated("Use requestPermissions() instead")
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<String>,
         grantResults: IntArray
     ) {
+        @Suppress("DEPRECATION")
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         permissionManager.handleRequestPermissionsResult(requestCode, permissions, grantResults)
     }
