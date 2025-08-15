@@ -118,7 +118,7 @@
         <!-- WorkManager System Foreground Service -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="dataSync|specialUse"
+            android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
         <activity

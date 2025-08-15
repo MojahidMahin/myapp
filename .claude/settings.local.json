@@ -8,8 +8,10 @@
       "Bash(java:*)",
       "WebSearch",
       "WebFetch(domain:github.com)",
-      "Bash(gradlew.bat clean:*)"
+      "Bash(gradlew.bat clean:*)",
+      "Bash(adb:*)"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }
