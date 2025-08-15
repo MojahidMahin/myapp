@@ -297,7 +297,7 @@ class GmailIntegrationService(private val context: Context) {
                 }
                 
                 val contentType = if (isHtml) "text/html" else "text/plain"
-                val rawMessage = createRawMessage(originalEmail.from, replySubject, replyBody, contentType)
+                val rawMessage = createReplyMessage(originalEmail.from, replySubject, replyBody, contentType, originalMessage)
                 
                 val message = Message()
                 message.raw = rawMessage
@@ -412,6 +412,48 @@ class GmailIntegrationService(private val context: Context) {
             
             $body
         """.trimIndent()
+        
+        return android.util.Base64.encodeToString(
+            message.toByteArray(),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
+        )
+    }
+    
+    /**
+     * Create raw email message for replying (with proper headers)
+     */
+    private fun createReplyMessage(toEmail: String, subject: String, body: String, contentType: String, originalMessage: Message): String {
+        val account = currentAccount ?: throw Exception("No authenticated account")
+        
+        // Extract Message-ID from original message for proper threading
+        val originalHeaders = originalMessage.payload?.headers ?: emptyList()
+        val originalMessageId = originalHeaders.find { it.name.equals("Message-ID", true) }?.value
+        val originalReferences = originalHeaders.find { it.name.equals("References", true) }?.value
+        
+        val replyMessageId = "<reply-${System.currentTimeMillis()}@${account.email?.substringAfter("@") ?: "gmail.com"}>"
+        
+        // Build references header for proper email threading
+        val references = if (originalReferences.isNullOrBlank()) {
+            originalMessageId ?: ""
+        } else {
+            "$originalReferences $originalMessageId"
+        }.trim()
+        
+        val message = buildString {
+            appendLine("From: ${account.email}")
+            appendLine("To: $toEmail")
+            appendLine("Subject: $subject")
+            appendLine("Content-Type: $contentType; charset=UTF-8")
+            appendLine("Message-ID: $replyMessageId")
+            if (originalMessageId?.isNotBlank() == true) {
+                appendLine("In-Reply-To: $originalMessageId")
+            }
+            if (references.isNotBlank()) {
+                appendLine("References: $references")
+            }
+            appendLine()
+            append(body)
+        }
         
         return android.util.Base64.encodeToString(
             message.toByteArray(),

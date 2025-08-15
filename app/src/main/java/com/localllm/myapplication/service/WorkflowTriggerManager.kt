@@ -218,6 +218,7 @@ class WorkflowTriggerManager(
             when (trigger) {
                 is MultiUserTrigger.ScheduledTrigger -> checkScheduledTrigger(workflow, trigger)
                 is MultiUserTrigger.UserGmailNewEmail -> checkGmailTrigger(workflow, trigger)
+                is MultiUserTrigger.UserGmailEmailReceived -> checkGmailEmailReceivedTrigger(workflow, trigger)
                 is MultiUserTrigger.UserTelegramMessage -> checkTelegramTrigger(workflow, trigger)
                 is MultiUserTrigger.ManualTrigger -> {
                     // Manual triggers are not checked automatically
@@ -372,6 +373,131 @@ class WorkflowTriggerManager(
             TriggerExecutionResult(workflow.id, "UserGmailNewEmail", false, "Error: ${e.message}")
         } finally {
             Log.d(TAG, "=== GMAIL TRIGGER CHECK END ===")
+        }
+    }
+    
+    /**
+     * Check Gmail Email Received trigger (with sender/subject/body filters)
+     */
+    private suspend fun checkGmailEmailReceivedTrigger(
+        workflow: MultiUserWorkflow, 
+        trigger: MultiUserTrigger.UserGmailEmailReceived
+    ): TriggerExecutionResult {
+        return try {
+            Log.d(TAG, "=== GMAIL EMAIL RECEIVED TRIGGER CHECK START ===")
+            Log.d(TAG, "Workflow: ${workflow.name} (ID: ${workflow.id})")
+            Log.d(TAG, "User: ${trigger.userId}")
+            Log.d(TAG, "Filters: fromFilter=${trigger.fromFilter}, subjectFilter=${trigger.subjectFilter}, bodyFilter=${trigger.bodyFilter}")
+            
+            // Check rate limiting
+            val workflowKey = "${workflow.id}_${trigger.userId}"
+            val lastCheck = lastEmailCheckTimes[workflowKey] ?: 0
+            val currentTime = System.currentTimeMillis()
+            val timeSinceLastCheck = currentTime - lastCheck
+            
+            if (timeSinceLastCheck < minEmailCheckInterval) {
+                val remainingTime = (minEmailCheckInterval - timeSinceLastCheck) / 1000
+                Log.d(TAG, "Rate limiting: Last check was ${timeSinceLastCheck}ms ago, waiting ${remainingTime}s more")
+                return TriggerExecutionResult(
+                    workflow.id, 
+                    "UserGmailEmailReceived", 
+                    false, 
+                    "Rate limited: checked ${remainingTime}s ago"
+                )
+            }
+            
+            // Update last check time
+            lastEmailCheckTimes[workflowKey] = currentTime
+            
+            val gmailService = userManager.getGmailService(trigger.userId)
+            if (gmailService == null) {
+                Log.w(TAG, "Gmail service not available for user: ${trigger.userId}")
+                return TriggerExecutionResult(
+                    workflow.id, 
+                    "UserGmailEmailReceived", 
+                    false, 
+                    "Gmail service not available for user"
+                )
+            }
+            
+            Log.d(TAG, "Gmail service available, checking for new emails...")
+            
+            // Create email condition based on filters
+            val condition = GmailIntegrationService.EmailCondition(
+                isUnreadOnly = true,
+                fromFilter = trigger.fromFilter?.takeIf { it.isNotBlank() },
+                subjectFilter = trigger.subjectFilter?.takeIf { it.isNotBlank() },
+                bodyFilter = trigger.bodyFilter?.takeIf { it.isNotBlank() },
+                maxAgeHours = 2, // Only look at emails from last 2 hours
+                newerThan = lastCheck // Only get emails newer than last check
+            )
+            
+            Log.d(TAG, "Email condition created: fromFilter=${condition.fromFilter}, subjectFilter=${condition.subjectFilter}, bodyFilter=${condition.bodyFilter}")
+            
+            val emailsResult = gmailService.checkForNewEmails(condition, 5) // Limit to 5 emails
+            emailsResult.fold(
+                onSuccess = { emails ->
+                    Log.d(TAG, "Gmail API returned ${emails.size} emails")
+                    
+                    // Use deduplication service to filter new emails
+                    val newEmails = emailDeduplicationService.filterNewEmails(emails, workflow.id)
+                    
+                    Log.i(TAG, "Found ${newEmails.size} NEW unprocessed emails (${emails.size - newEmails.size} already processed or too recent)")
+                    
+                    if (newEmails.isNotEmpty()) {
+                        val latestEmail = newEmails.first()
+                        Log.i(TAG, "PROCESSING NEW EMAIL:")
+                        Log.i(TAG, "  ID: ${latestEmail.id}")
+                        Log.i(TAG, "  From: ${latestEmail.from}")
+                        Log.i(TAG, "  Subject: ${latestEmail.subject}")
+                        Log.i(TAG, "  Timestamp: ${latestEmail.timestamp}")
+                        Log.i(TAG, "  Is Read: ${latestEmail.isRead}")
+                        
+                        // Mark this email as processed BEFORE executing workflow
+                        val marked = emailDeduplicationService.markEmailAsProcessed(
+                            emailId = latestEmail.id,
+                            workflowId = workflow.id,
+                            userId = trigger.userId,
+                            emailFrom = latestEmail.from,
+                            emailSubject = latestEmail.subject,
+                            emailTimestamp = latestEmail.timestamp
+                        )
+                        
+                        if (!marked) {
+                            Log.e(TAG, "Failed to mark email as processed, skipping workflow execution")
+                            return TriggerExecutionResult(workflow.id, "UserGmailEmailReceived", false, "Failed to mark email as processed")
+                        }
+                        
+                        Log.d(TAG, "Email ${latestEmail.id} marked as processed")
+                        
+                        // Create trigger data with email details
+                        val triggerData = mapOf(
+                            "source" to "gmail",
+                            "email_from" to latestEmail.from,
+                            "email_subject" to latestEmail.subject,
+                            "email_body" to latestEmail.body,
+                            "trigger_email_id" to latestEmail.id,
+                            "type" to "email_received"
+                        )
+                        
+                        Log.i(TAG, "EXECUTING WORKFLOW for email ${latestEmail.id}")
+                        executeWorkflowWithData(workflow, trigger.userId, triggerData)
+                    } else {
+                        Log.d(TAG, "No new unprocessed emails found for workflow: ${workflow.name}")
+                        TriggerExecutionResult(workflow.id, "UserGmailEmailReceived", false, "No new emails (all already processed or too recent)")
+                    }
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "FAILED to check emails: ${error.message}")
+                    TriggerExecutionResult(workflow.id, "UserGmailEmailReceived", false, "Failed to check emails: ${error.message}")
+                }
+            )
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "ERROR in Gmail Email Received trigger check", e)
+            TriggerExecutionResult(workflow.id, "UserGmailEmailReceived", false, "Error: ${e.message}")
+        } finally {
+            Log.d(TAG, "=== GMAIL EMAIL RECEIVED TRIGGER CHECK END ===")
         }
     }
     
