@@ -146,20 +146,27 @@ class ChatViewModel(
         
         var currentResponseMessage: ChatMessage? = null
         val images = if (image != null) listOf(image) else emptyList()
+        val responseBuilder = StringBuilder()
         
         modelManager.generateResponse(
             prompt = text,
             images = images,
             onPartialResult = { partialText ->
+                Log.d(TAG, "🎯 Received partial result: '$partialText'")
+                responseBuilder.append(partialText)
+                val accumulatedText = responseBuilder.toString()
+                
                 if (currentResponseMessage == null) {
+                    Log.d(TAG, "📝 Creating new response message with text: '${accumulatedText.take(50)}...'")
                     currentResponseMessage = ChatMessage(
-                        text = partialText,
+                        text = accumulatedText,
                         isFromUser = false,
                         messageType = if (image != null) MessageType.MULTIMODAL else MessageType.TEXT_ONLY
                     )
                     addMessage(currentResponseMessage!!)
                 } else {
-                    updateLastMessage(partialText)
+                    Log.d(TAG, "🔄 Updating message with accumulated text (${accumulatedText.length} chars)")
+                    updateLastMessage(accumulatedText)
                 }
             }
         ) { result ->
@@ -225,7 +232,9 @@ class ChatViewModel(
         if (currentMessages.isNotEmpty()) {
             val lastMessage = currentMessages.last()
             if (!lastMessage.isFromUser) {
-                currentMessages[currentMessages.lastIndex] = lastMessage.copy(text = newText)
+                Log.d(TAG, "💬 Updating last message (${lastMessage.id}) with text: '${newText.take(100)}...'")
+                val updatedMessage = lastMessage.copy(text = newText)
+                currentMessages[currentMessages.lastIndex] = updatedMessage
                 chatSession.value = chatSession.value.copy(messages = currentMessages)
                 
                 // Update in persistent storage
@@ -239,7 +248,11 @@ class ChatViewModel(
                         }
                     )
                 }
+            } else {
+                Log.w(TAG, "⚠️ Trying to update user message - skipping")
             }
+        } else {
+            Log.w(TAG, "⚠️ No messages to update")
         }
     }
 

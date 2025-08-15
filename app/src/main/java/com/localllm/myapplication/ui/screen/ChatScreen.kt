@@ -270,6 +270,9 @@ fun ChatMessageItem(message: ChatMessage) {
     val clipboardManager = LocalClipboardManager.current
     var showCopyIcon by remember { mutableStateOf(false) }
     
+    // Debug logging for message rendering
+    android.util.Log.d("ChatScreen", "🎨 Rendering message (${message.id}): isFromUser=${message.isFromUser}, text='${message.text}' (${message.text.length} chars)")
+    
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isFromUser) {
