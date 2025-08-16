@@ -11,7 +11,15 @@
       "Bash(gradlew.bat clean:*)",
       "Bash(adb:*)",
       "Bash(gradlew.bat compileDebugKotlin:*)",
-      "Bash(.gradlew.bat compileDebugKotlin)"
+      "Bash(.gradlew.bat compileDebugKotlin)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

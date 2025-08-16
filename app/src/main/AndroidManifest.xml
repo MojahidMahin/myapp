@@ -114,12 +114,14 @@
             </intent-filter>
         </service>
 
+        <!-- WorkflowPersistenceService temporarily disabled due to missing dependencies -->
+        <!--
         <service
             android:name=".service.workflow.WorkflowPersistenceService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync"
-            tools:ignore="MissingClass" />
+            android:foregroundServiceType="dataSync" />
+        -->
 
         <!-- WorkManager System Foreground Service -->
         <service

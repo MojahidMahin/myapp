@@ -56,17 +56,10 @@ class MainActivity : ComponentActivity() {
         // Universal optimizations for all devices
         initializeUniversalOptimizations()
         
-        // Request permissions after UI is ready (optional)
-        // Commented out to prevent ANR during startup
-        /*
+        // Request all permissions after UI is ready
         Handler(Looper.getMainLooper()).postDelayed({
-            permissionManager.requestNotificationPermission(
-                onSuccess = { Log.d("MainActivity", "Notification permission granted") },
-                onDenied = { Log.w("MainActivity", "Notification permission denied") },
-                onError = { Log.e("MainActivity", "Permission error", it) }
-            )
+            requestAllPermissionsOnStartup()
         }, 2000)
-        */
     }
     
     /**
@@ -102,6 +95,151 @@ class MainActivity : ComponentActivity() {
             }
             
         }, 3000) // Delay to avoid startup interference
+    }
+    
+    /**
+     * Request all sensor and device permissions on app startup
+     */
+    private fun requestAllPermissionsOnStartup() {
+        Log.d("MainActivity", "🔐 Starting comprehensive permission request flow")
+        
+        // Create a permission flow that requests permissions in logical groups
+        val permissionFlow = PermissionFlow()
+        permissionFlow.startPermissionFlow()
+    }
+    
+    /**
+     * Sequential permission request flow for better user experience
+     */
+    private inner class PermissionFlow {
+        private var currentStep = 0
+        private val deniedPermissions = mutableListOf<String>()
+        
+        fun startPermissionFlow() {
+            requestNextPermissionGroup()
+        }
+        
+        private fun requestNextPermissionGroup() {
+            when (currentStep) {
+                0 -> {
+                    Log.d("MainActivity", "📱 Step 1: Requesting Notifications (Essential)")
+                    permissionManager.requestNotificationPermission(
+                        onSuccess = { 
+                            Log.d("MainActivity", "✅ Notifications granted")
+                            nextStep()
+                        },
+                        onDenied = { denied -> 
+                            deniedPermissions.addAll(denied)
+                            Log.w("MainActivity", "⚠️ Notifications denied: $denied")
+                            nextStep()
+                        },
+                        onError = { error ->
+                            Log.e("MainActivity", "❌ Notification permission error", error)
+                            nextStep()
+                        }
+                    )
+                }
+                1 -> {
+                    Log.d("MainActivity", "📍 Step 2: Requesting Location (GPS, Fine, Coarse)")
+                    permissionManager.requestLocationPermissions(
+                        onSuccess = { 
+                            Log.d("MainActivity", "✅ Location permissions granted")
+                            nextStep()
+                        },
+                        onDenied = { denied -> 
+                            deniedPermissions.addAll(denied)
+                            Log.w("MainActivity", "⚠️ Location permissions denied: $denied")
+                            nextStep()
+                        },
+                        onError = { error ->
+                            Log.e("MainActivity", "❌ Location permission error", error)
+                            nextStep()
+                        }
+                    )
+                }
+                2 -> {
+                    Log.d("MainActivity", "📷 Step 3: Requesting Media (Camera, Gallery, Storage)")
+                    permissionManager.requestMediaPermissions(
+                        onSuccess = { 
+                            Log.d("MainActivity", "✅ Media permissions granted")
+                            nextStep()
+                        },
+                        onDenied = { denied -> 
+                            deniedPermissions.addAll(denied)
+                            Log.w("MainActivity", "⚠️ Media permissions denied: $denied")
+                            nextStep()
+                        },
+                        onError = { error ->
+                            Log.e("MainActivity", "❌ Media permission error", error)
+                            nextStep()
+                        }
+                    )
+                }
+                3 -> {
+                    Log.d("MainActivity", "🏃 Step 4: Requesting Sensors (Body, Activity, Motion)")
+                    permissionManager.requestSensorPermissions(
+                        onSuccess = { 
+                            Log.d("MainActivity", "✅ Sensor permissions granted")
+                            nextStep()
+                        },
+                        onDenied = { denied -> 
+                            deniedPermissions.addAll(denied)
+                            Log.w("MainActivity", "⚠️ Sensor permissions denied: $denied")
+                            nextStep()
+                        },
+                        onError = { error ->
+                            Log.e("MainActivity", "❌ Sensor permission error", error)
+                            nextStep()
+                        }
+                    )
+                }
+                4 -> {
+                    Log.d("MainActivity", "🔋 Step 5: Requesting Background App Optimization")
+                    permissionManager.requestBackgroundAppPermission(
+                        onSuccess = { 
+                            Log.d("MainActivity", "✅ Background app permission granted")
+                            nextStep()
+                        },
+                        onDenied = { denied -> 
+                            deniedPermissions.addAll(denied)
+                            Log.w("MainActivity", "⚠️ Background app permission denied: $denied")
+                            nextStep()
+                        },
+                        onError = { error ->
+                            Log.e("MainActivity", "❌ Background app permission error", error)
+                            nextStep()
+                        }
+                    )
+                }
+                else -> {
+                    // Permission flow completed
+                    completionSummary()
+                }
+            }
+        }
+        
+        private fun nextStep() {
+            currentStep++
+            // Small delay between permission requests for better UX
+            Handler(Looper.getMainLooper()).postDelayed({
+                requestNextPermissionGroup()
+            }, 1000)
+        }
+        
+        private fun completionSummary() {
+            val totalRequested = currentStep * 2 // Approximate
+            val granted = totalRequested - deniedPermissions.size
+            
+            Log.i("MainActivity", "🎉 Permission flow completed!")
+            Log.i("MainActivity", "📊 Summary: $granted granted, ${deniedPermissions.size} denied")
+            
+            if (deniedPermissions.isNotEmpty()) {
+                Log.w("MainActivity", "⚠️ Denied permissions: ${deniedPermissions.joinToString(", ")}")
+                Log.i("MainActivity", "💡 App will work with reduced functionality. Users can re-grant in Settings.")
+            } else {
+                Log.i("MainActivity", "✨ All permissions granted! App has full sensor and device access.")
+            }
+        }
     }
 
     fun launchSignInActivity(intent: Intent) {
