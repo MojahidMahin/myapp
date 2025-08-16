@@ -253,7 +253,11 @@ class MultiUserWorkflowEngine(
     // Gmail Action Implementations
     private suspend fun executeSendToUserGmail(action: MultiUserAction.SendToUserGmail, context: WorkflowExecutionContext): Result<String> {
         val targetUserId = if (action.targetUserId.isEmpty()) context.triggerUserId else action.targetUserId
-        Log.d(TAG, "Sending Gmail to user: $targetUserId")
+        
+        Log.d(TAG, "=== GMAIL SEND ACTION DEBUG ===")
+        Log.d(TAG, "Target User ID: $targetUserId")
+        Log.d(TAG, "Available variables: ${context.variables}")
+        Log.d(TAG, "Variables count: ${context.variables.size}")
         
         val gmailService = userManager.getGmailService(targetUserId)
         if (gmailService == null) {
@@ -271,7 +275,12 @@ class MultiUserWorkflowEngine(
         val processedSubject = replaceVariables(action.subject, context.variables)
         val processedBody = replaceVariables(action.body, context.variables)
         
-        Log.d(TAG, "Sending email to: $toEmail, Subject: $processedSubject")
+        Log.d(TAG, "To Email: $toEmail")
+        Log.d(TAG, "Subject template: ${action.subject}")
+        Log.d(TAG, "Processed Subject: $processedSubject")
+        Log.d(TAG, "Body template: ${action.body}")
+        Log.d(TAG, "Processed Body: $processedBody")
+        Log.d(TAG, "=== END GMAIL SEND DEBUG ===")
         
         return gmailService.sendEmail(toEmail, processedSubject, processedBody, action.isHtml)
             .map { messageId -> "Email sent successfully with ID: $messageId" }
@@ -285,8 +294,20 @@ class MultiUserWorkflowEngine(
         val processedBody = replaceVariables(action.replyBody, context.variables)
         val processedMessageId = replaceVariables(action.originalMessageId, context.variables)
         
-        Log.d(TAG, "Replying to Gmail with processed message ID: $processedMessageId")
+        Log.d(TAG, "=== GMAIL REPLY ACTION DEBUG ===")
+        Log.d(TAG, "Target User ID: $targetUserId")
+        Log.d(TAG, "Original Message ID template: ${action.originalMessageId}")
+        Log.d(TAG, "Processed Message ID: $processedMessageId")
+        Log.d(TAG, "Reply Body template: ${action.replyBody}")
+        Log.d(TAG, "Processed Reply Body: $processedBody")
         Log.d(TAG, "Available variables: ${context.variables}")
+        Log.d(TAG, "Variables count: ${context.variables.size}")
+        Log.d(TAG, "=== END GMAIL REPLY DEBUG ===")
+        
+        if (processedMessageId.isBlank() || processedMessageId == action.originalMessageId) {
+            Log.e(TAG, "Original message ID was not properly replaced with variable. Check if 'trigger_email_id' exists in variables.")
+            return Result.failure(Exception("Original message ID was not properly replaced with variable"))
+        }
         
         return gmailService.replyToEmail(processedMessageId, processedBody, action.isHtml)
     }

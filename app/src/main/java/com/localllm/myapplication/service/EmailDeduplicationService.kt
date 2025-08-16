@@ -17,7 +17,7 @@ class EmailDeduplicationService(context: Context) {
     companion object {
         private const val TAG = "EmailDeduplicationService"
         private const val EMAIL_RETENTION_DAYS = 30 // Keep processed emails for 30 days
-        private const val MIN_EMAIL_AGE_MINUTES = 1 // Only process emails older than 1 minute
+        private const val MIN_EMAIL_AGE_MINUTES = 0 // Process emails immediately for workflow automation
     }
     
     private val database = WorkflowDatabase.getDatabase(context)
@@ -90,8 +90,8 @@ class EmailDeduplicationService(context: Context) {
                 val filteredEmails = mutableListOf<GmailIntegrationService.EmailMessage>()
                 
                 for (email in emails) {
-                    // Check if email is old enough to process
-                    if (email.timestamp > minAgeThreshold) {
+                    // Check if email is old enough to process (only if MIN_EMAIL_AGE_MINUTES > 0)
+                    if (MIN_EMAIL_AGE_MINUTES > 0 && email.timestamp > minAgeThreshold) {
                         Log.d(TAG, "Email ${email.id} is too recent (${email.timestamp} > $minAgeThreshold), skipping")
                         continue
                     }

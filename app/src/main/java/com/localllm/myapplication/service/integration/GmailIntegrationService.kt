@@ -250,6 +250,13 @@ class GmailIntegrationService(private val context: Context) {
     ): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
+                Log.d(TAG, "=== GMAIL SEND EMAIL DEBUG ===")
+                Log.d(TAG, "To: $to")
+                Log.d(TAG, "Subject: $subject")
+                Log.d(TAG, "Body length: ${body.length} chars")
+                Log.d(TAG, "Is HTML: $isHtml")
+                Log.d(TAG, "Current account: ${currentAccount?.email}")
+                
                 val service = gmailService ?: return@withContext Result.failure(
                     Exception("Gmail service not initialized. Please sign in first.")
                 )
@@ -260,13 +267,17 @@ class GmailIntegrationService(private val context: Context) {
                 val message = Message()
                 message.raw = rawMessage
                 
+                Log.d(TAG, "Sending email via Gmail API...")
                 val sent = service.users().messages().send("me", message).execute()
                 
                 Log.d(TAG, "Email sent successfully. Message ID: ${sent.id}")
+                Log.d(TAG, "=== END GMAIL SEND DEBUG ===")
                 Result.success(sent.id)
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send email", e)
+                Log.e(TAG, "Failed to send email to $to with subject '$subject'", e)
+                Log.e(TAG, "Error details: ${e.message}")
+                Log.e(TAG, "Error type: ${e::class.simpleName}")
                 Result.failure(e)
             }
         }
@@ -282,19 +293,32 @@ class GmailIntegrationService(private val context: Context) {
     ): Result<String> {
         return withContext(Dispatchers.IO) {
             try {
+                Log.d(TAG, "=== GMAIL REPLY EMAIL DEBUG ===")
+                Log.d(TAG, "Original Message ID: $originalMessageId")
+                Log.d(TAG, "Reply Body length: ${replyBody.length} chars")
+                Log.d(TAG, "Is HTML: $isHtml")
+                Log.d(TAG, "Current account: ${currentAccount?.email}")
+                
                 val service = gmailService ?: return@withContext Result.failure(
                     Exception("Gmail service not initialized. Please sign in first.")
                 )
                 
+                Log.d(TAG, "Fetching original message...")
                 // Get original message to extract reply information
                 val originalMessage = service.users().messages().get("me", originalMessageId).execute()
                 val originalEmail = parseEmailMessage(originalMessage)
+                
+                Log.d(TAG, "Original email from: ${originalEmail.from}")
+                Log.d(TAG, "Original email subject: ${originalEmail.subject}")
+                Log.d(TAG, "Original email thread ID: ${originalEmail.threadId}")
                 
                 val replySubject = if (originalEmail.subject.startsWith("Re:")) {
                     originalEmail.subject
                 } else {
                     "Re: ${originalEmail.subject}"
                 }
+                
+                Log.d(TAG, "Reply subject: $replySubject")
                 
                 val contentType = if (isHtml) "text/html" else "text/plain"
                 val rawMessage = createReplyMessage(originalEmail.from, replySubject, replyBody, contentType, originalMessage)
@@ -303,13 +327,17 @@ class GmailIntegrationService(private val context: Context) {
                 message.raw = rawMessage
                 message.threadId = originalEmail.threadId
                 
+                Log.d(TAG, "Sending reply via Gmail API...")
                 val sent = service.users().messages().send("me", message).execute()
                 
                 Log.d(TAG, "Reply sent successfully. Message ID: ${sent.id}")
+                Log.d(TAG, "=== END GMAIL REPLY DEBUG ===")
                 Result.success(sent.id)
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send reply", e)
+                Log.e(TAG, "Failed to send reply to message ID $originalMessageId", e)
+                Log.e(TAG, "Error details: ${e.message}")
+                Log.e(TAG, "Error type: ${e::class.simpleName}")
                 Result.failure(e)
             }
         }
