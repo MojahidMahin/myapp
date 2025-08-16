@@ -33,6 +33,7 @@ import com.localllm.myapplication.ui.screen.TelegramBotDynamicScreen
 import com.localllm.myapplication.data.*
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.ui.theme.MyApplicationTheme
+import com.localllm.myapplication.ui.theme.*
 import kotlinx.coroutines.launch
 
 /**
@@ -45,10 +46,7 @@ class WorkflowManagerActivity : ComponentActivity() {
         
         setContent {
             MyApplicationTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
+                GradientBackground {
                     WorkflowManagerScreen(
                         onNavigateBack = { finish() }
                     )
@@ -458,18 +456,15 @@ private fun WorkflowsTab() {
                         text = "Create automated workflows between Gmail and Telegram with AI assistance",
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Button(
+                    ModernSpacing()
+                    ModernPrimaryButton(
+                        text = "✨ Create Workflow",
                         onClick = { 
                             // Launch dynamic workflow creation screen
                             val intent = Intent(context, DynamicWorkflowBuilderActivity::class.java)
                             context.startActivity(intent)
                         }
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Create Workflow")
-                    }
+                    )
                 }
             }
         }
@@ -542,18 +537,15 @@ private fun GmailTab(
                         }
                         
                         if (gmailSignedIn) {
-                            OutlinedButton(
-                                onClick = onSignOut,
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    contentColor = Color.Red
-                                )
-                            ) {
-                                Text("Sign Out")
-                            }
+                            ModernDangerButton(
+                                text = "🚪 Sign Out",
+                                onClick = onSignOut
+                            )
                         } else {
-                            Button(onClick = onSignIn) {
-                                Text("Sign In")
-                            }
+                            ModernSuccessButton(
+                                text = "🔐 Sign In to Gmail",
+                                onClick = onSignIn
+                            )
                         }
                     }
                 }

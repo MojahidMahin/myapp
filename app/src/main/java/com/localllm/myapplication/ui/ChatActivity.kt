@@ -10,6 +10,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.ui.screen.ChatScreen
+import com.localllm.myapplication.ui.theme.*
 
 class ChatActivity : ComponentActivity() {
 
@@ -32,12 +33,9 @@ class ChatActivity : ComponentActivity() {
             Log.d(TAG, "Setting content...")
             setContent {
                 Log.d(TAG, "Inside setContent block")
-                MaterialTheme {
+                MyApplicationTheme {
                     Log.d(TAG, "Inside MaterialTheme block")
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
-                    ) {
+                    GradientBackground {
                         Log.d(TAG, "Inside Surface block, about to call ChatScreen")
                         ChatScreen(viewModel = chatViewModel)
                         Log.d(TAG, "ChatScreen called successfully")

@@ -30,6 +30,7 @@ import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.TelegramBotService
 import com.localllm.myapplication.ui.theme.MyApplicationTheme
+import com.localllm.myapplication.ui.theme.*
 import kotlinx.coroutines.launch
 import java.util.*
 
@@ -47,15 +48,17 @@ class DynamicWorkflowBuilderActivity : ComponentActivity() {
         
         setContent {
             MyApplicationTheme {
-                DynamicWorkflowBuilderScreen(
-                    onBackPressed = { finish() },
-                    onWorkflowCreated = { 
-                        // Show success message and go back
-                        finish()
-                    },
-                    editWorkflowId = workflowId,
-                    isEditMode = isEditMode
-                )
+                GradientBackground {
+                    DynamicWorkflowBuilderScreen(
+                        onBackPressed = { finish() },
+                        onWorkflowCreated = { 
+                            // Show success message and go back
+                            finish()
+                        },
+                        editWorkflowId = workflowId,
+                        isEditMode = isEditMode
+                    )
+                }
             }
         }
     }
@@ -214,24 +217,7 @@ fun DynamicWorkflowBuilderScreen(
                     }
                 },
                 actions = {
-                    // Save as Template button
-                    if (canCreateWorkflow(workflowName, selectedTrigger, selectedActions)) {
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    saveAsTemplate(
-                                        name = workflowName,
-                                        description = workflowDescription,
-                                        trigger = selectedTrigger!!,
-                                        actions = selectedActions,
-                                        users = selectedUsers
-                                    )
-                                }
-                            }
-                        ) {
-                            Text("SAVE AS TEMPLATE")
-                        }
-                    }
+                    // Removed "Save as Template" button as requested
                     
                     // Create workflow button
                     TextButton(
@@ -255,14 +241,16 @@ fun DynamicWorkflowBuilderScreen(
                                         userManager = userManager,
                                         workflowRepository = workflowRepository,
                                         onSuccess = {
-                                            android.util.Log.i("WorkflowBuilder", "Workflow created successfully!")
+                                            android.util.Log.i("WorkflowBuilder", "Workflow ${if (isEditMode) "updated" else "created"} successfully!")
                                             isCreating = false
                                             onWorkflowCreated()
                                         },
                                         onError = { error ->
-                                            android.util.Log.e("WorkflowBuilder", "Workflow creation failed: ${error.message}")
+                                            android.util.Log.e("WorkflowBuilder", "Workflow ${if (isEditMode) "update" else "creation"} failed: ${error.message}")
                                             isCreating = false
-                                        }
+                                        },
+                                        editWorkflowId = editWorkflowId,
+                                        isEditMode = isEditMode
                                     )
                                 }
                             } else {
@@ -274,7 +262,7 @@ fun DynamicWorkflowBuilderScreen(
                         if (isCreating) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text("CREATE")
+                            Text(if (isEditMode) "SAVE CHANGES" else "CREATE")
                         }
                     }
                 }
@@ -828,7 +816,9 @@ suspend fun createDynamicWorkflow(
     userManager: com.localllm.myapplication.service.UserManager,
     workflowRepository: WorkflowRepository,
     onSuccess: () -> Unit,
-    onError: (Exception) -> Unit
+    onError: (Exception) -> Unit,
+    editWorkflowId: String? = null, // Add edit mode parameter
+    isEditMode: Boolean = false      // Add edit mode flag
 ) {
     try {
         android.util.Log.i("WorkflowBuilder", "=== Starting createDynamicWorkflow ===")
@@ -856,7 +846,16 @@ suspend fun createDynamicWorkflow(
         android.util.Log.d("WorkflowBuilder", "Actions converted: ${workflowActions.size}")
         
         android.util.Log.d("WorkflowBuilder", "Creating workflow object...")
-        val workflowId = UUID.randomUUID().toString()
+        // Use existing ID in edit mode, or generate new ID for create mode
+        val workflowId = if (isEditMode && editWorkflowId != null) {
+            android.util.Log.i("WorkflowBuilder", "Edit mode - using existing ID: $editWorkflowId")
+            editWorkflowId
+        } else {
+            val newId = UUID.randomUUID().toString()
+            android.util.Log.i("WorkflowBuilder", "Create mode - generating new ID: $newId")
+            newId
+        }
+        
         val workflow = MultiUserWorkflow(
             id = workflowId,
             name = name,
@@ -869,8 +868,15 @@ suspend fun createDynamicWorkflow(
         )
         android.util.Log.i("WorkflowBuilder", "Workflow object created with ID: $workflowId")
         
+        // Use updateWorkflow for edit mode, saveWorkflow for create mode
         android.util.Log.d("WorkflowBuilder", "Saving workflow to repository...")
-        val result = workflowRepository.saveWorkflow(workflow)
+        val result = if (isEditMode) {
+            android.util.Log.d("WorkflowBuilder", "Edit mode - updating existing workflow")
+            workflowRepository.updateWorkflow(workflow)
+        } else {
+            android.util.Log.d("WorkflowBuilder", "Create mode - saving new workflow")
+            workflowRepository.saveWorkflow(workflow)
+        }
         result.fold(
             onSuccess = { 
                 android.util.Log.i("WorkflowBuilder", "Workflow saved successfully!")
@@ -2834,37 +2840,7 @@ fun validateWorkflowConnectivity(
 }
 
 // Save workflow as template function
-suspend fun saveAsTemplate(
-    name: String,
-    description: String,
-    trigger: TriggerConfig,
-    actions: List<ActionConfig>,
-    users: List<WorkflowUser>
-) {
-    try {
-        val template = WorkflowTemplate(
-            id = "custom_${UUID.randomUUID().toString().take(8)}",
-            name = "$name (Custom Template)",
-            description = description,
-            category = "Custom",
-            platforms = determinePlatforms(trigger, actions),
-            requiredUsers = if (users.isNotEmpty()) 1 else 0,
-            optionalUsers = users.size,
-            estimatedSetupTime = "2-5 minutes",
-            tags = generateTemplateTags(trigger, actions),
-            isCustom = true,
-            triggerConfig = trigger,
-            actionConfigs = actions
-        )
-        
-        // Templates disabled - workflows are created directly without templates
-        
-        android.util.Log.d("TemplateCreation", "Created custom template: ${template.name}")
-        
-    } catch (e: Exception) {
-        android.util.Log.e("TemplateCreation", "Failed to save template", e)
-    }
-}
+// Removed saveAsTemplate function as requested
 
 fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): List<WorkflowPlatform> {
     val platforms = mutableSetOf<WorkflowPlatform>()

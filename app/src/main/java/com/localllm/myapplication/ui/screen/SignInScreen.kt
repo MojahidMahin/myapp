@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.collectAsState
@@ -13,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import android.content.Intent
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
@@ -25,6 +28,7 @@ import com.localllm.myapplication.ui.viewmodel.AuthViewModel
 // import com.localllm.myapplication.ui.viewmodel.WorkflowViewModel
 // import com.localllm.myapplication.service.workflow.WorkflowPersistenceService
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SignInScreen(viewModel: AuthViewModel) {
     val email by viewModel.userEmail
@@ -123,15 +127,55 @@ fun SignInScreen(viewModel: AuthViewModel) {
         }
     }
 
-    Surface(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            verticalArrangement = Arrangement.Top,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(320.dp)
+            ) {
+                DrawerContent(
+                    permissionManager = permissionManager,
+                    backgroundServiceManager = backgroundServiceManager,
+                    modelManager = modelManager,
+                    context = context,
+                    onCloseDrawer = {
+                        scope.launch { drawerState.close() }
+                    }
+                )
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = { Text("AI Workflow Automation") },
+                    navigationIcon = {
+                        IconButton(onClick = {
+                            scope.launch { drawerState.open() }
+                        }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    )
+                )
+            }
+        ) { paddingValues ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.Top,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
             Spacer(modifier = Modifier.height(16.dp))
             
             // Model Management Section (Always visible)
@@ -329,275 +373,6 @@ fun SignInScreen(viewModel: AuthViewModel) {
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 
-                // Background service controls
-                Text(
-                    text = "Background Service Controls",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                
-                // Debug status button
-                Button(
-                    onClick = {
-                        Log.d("UI", "=== SERVICE STATUS CHECK ===")
-                        Log.d("UI", "Service running: ${backgroundServiceManager.isServiceRunning()}")
-                        Log.d("UI", "=== END STATUS CHECK ===")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("🔍 Check Service Status")
-                }
-                
-                // Simple test button
-                Button(
-                    onClick = {
-                        Log.d("UI-TEST", "SIMPLE TEST BUTTON CLICKED - THIS SHOULD ALWAYS SHOW")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("🧪 Simple Test Button")
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            Log.d("UI", "=== SYNC DATA BUTTON CLICKED ===")
-                            Log.d("UI", "Service running: ${backgroundServiceManager.isServiceRunning()}")
-                            val command = BackgroundWorkCommand(BackgroundWorkCommand.WorkType.DATA_SYNC)
-                            Log.d("UI", "Created command: ${command.getExecutionTag()}")
-                            Log.d("UI", "About to execute command...")
-                            backgroundServiceManager.executeBackgroundCommand(command)
-                            Log.d("UI", "Command sent to service manager")
-                            Log.d("UI", "=== BUTTON CLICK COMPLETE ===")
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Sync Data")
-                    }
-                    
-                    Button(
-                        onClick = {
-                            Log.d("UI", "Clean Cache button clicked")
-                            val command = BackgroundWorkCommand(BackgroundWorkCommand.WorkType.CACHE_CLEANUP)
-                            Log.d("UI", "Created command: ${command.getExecutionTag()}")
-                            backgroundServiceManager.executeBackgroundCommand(command)
-                            Log.d("UI", "Command sent to service manager")
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Clean Cache")
-                    }
-                }
-                
-                Button(
-                    onClick = {
-                        Log.d("UI", "Custom Workflow button clicked")
-                        val command = BackgroundWorkCommand(BackgroundWorkCommand.WorkType.CUSTOM_WORKFLOW)
-                        Log.d("UI", "Created command: ${command.getExecutionTag()}")
-                        backgroundServiceManager.executeBackgroundCommand(command)
-                        Log.d("UI", "Command sent to service manager")
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Run Custom Workflow")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Permission controls
-                Text(
-                    text = "Permission Controls",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Button(
-                    onClick = { permissionManager.requestNotificationPermission() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("🔔 Request Notification Permission")
-                }
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { permissionManager.requestLocationPermissions() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Location")
-                    }
-                    
-                    Button(
-                        onClick = { permissionManager.requestSensorPermissions() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Sensors")
-                    }
-                }
-                
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { permissionManager.requestMediaPermissions() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Media")
-                    }
-                    
-                    Button(
-                        onClick = { permissionManager.requestBackgroundAppPermission() },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("Background")
-                    }
-                }
-                
-                Button(
-                    onClick = { 
-                        permissionManager.requestAllPermissions(
-                            onAllGranted = { /* Handle success */ },
-                            onSomeDelayed = { /* Handle partial */ },
-                            onError = { /* Handle error */ }
-                        )
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Request All Permissions")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Background processing test section
-                Text(
-                    text = "Background Processing Tests",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                
-                // Test background chat task
-                Button(
-                    onClick = {
-                        Log.d("UI", "Schedule background chat task clicked")
-                        modelManager.scheduleBackgroundChatTask(
-                            prompt = "Write a short poem about artificial intelligence",
-                            priority = com.localllm.myapplication.data.Priority.NORMAL
-                        ) { result ->
-                            result.fold(
-                                onSuccess = { message ->
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Background task scheduled: $message",
-                                        android.widget.Toast.LENGTH_LONG
-                                    ).show()
-                                },
-                                onFailure = { error ->
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Failed to schedule: ${error.message}",
-                                        android.widget.Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("📝 Schedule Background Chat")
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                // Test timed task
-                Button(
-                    onClick = {
-                        Log.d("UI", "Schedule timed task clicked")
-                        val futureTime = System.currentTimeMillis() + 30000 // 30 seconds from now
-                        modelManager.scheduleTimedTask(
-                            prompt = "What is the current time?",
-                            scheduledTime = futureTime,
-                            priority = com.localllm.myapplication.data.Priority.HIGH
-                        ) { result ->
-                            result.fold(
-                                onSuccess = { message ->
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Timed task scheduled: $message",
-                                        android.widget.Toast.LENGTH_LONG
-                                    ).show()
-                                },
-                                onFailure = { error ->
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Failed to schedule: ${error.message}",
-                                        android.widget.Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("⏰ Schedule Timed Task (30s)")
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                // View pending tasks
-                Button(
-                    onClick = {
-                        Log.d("UI", "View pending tasks clicked")
-                        modelManager.getPendingBackgroundTasks { tasks ->
-                            val message = if (tasks.isEmpty()) {
-                                "No pending background tasks"
-                            } else {
-                                "Pending tasks: ${tasks.size}\n" + 
-                                tasks.take(3).joinToString("\n") { 
-                                    "${it.type}: ${it.prompt.take(30)}..." 
-                                }
-                            }
-                            android.widget.Toast.makeText(
-                                context,
-                                message,
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("📋 View Pending Tasks")
-                }
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                // Direct test button
-                Button(
-                    onClick = {
-                        Log.d("UI", "Direct test button clicked")
-                        val command = BackgroundWorkCommand(BackgroundWorkCommand.WorkType.DATA_SYNC)
-                        Log.d("UI", "Executing command on background thread...")
-                        Thread {
-                            try {
-                                command.execute()
-                                Log.d("UI", "Direct execution completed")
-                            } catch (e: Exception) {
-                                Log.e("UI", "Direct execution failed", e)
-                            }
-                        }.start()
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("🔧 Test Direct Execution")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
                 // Workflow Automation Section
                 Text(
                     text = "Workflow Automation",
@@ -649,6 +424,202 @@ fun SignInScreen(viewModel: AuthViewModel) {
                     }
                 }
             }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DrawerContent(
+    permissionManager: com.localllm.myapplication.permission.PermissionManager,
+    backgroundServiceManager: com.localllm.myapplication.service.BackgroundServiceManager,
+    modelManager: com.localllm.myapplication.service.ModelManager,
+    context: android.content.Context,
+    onCloseDrawer: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Header
+        Text(
+            text = "⚙️ App Controls",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.padding(bottom = 24.dp)
+        )
+        
+        // Background Service Controls Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "🔧 Background Service Controls",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = {
+                        Log.d("UI", "=== SERVICE STATUS CHECK ===")
+                        Log.d("UI", "Service running: ${backgroundServiceManager.isServiceRunning()}")
+                        Log.d("UI", "=== END STATUS CHECK ===")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("🔍 Check Service Status")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = {
+                        Log.d("UI-TEST", "SIMPLE TEST BUTTON CLICKED - THIS SHOULD ALWAYS SHOW")
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("🧪 Simple Test")
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Permission Controls Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "🔐 Permission Controls",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = { permissionManager.requestNotificationPermission() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("🔔 Request Notification Permission")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { permissionManager.requestLocationPermissions() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("📍 Location")
+                    }
+                    Button(
+                        onClick = { permissionManager.requestSensorPermissions() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("📱 Sensor")
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { permissionManager.requestMediaPermissions() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("🎵 Media")
+                    }
+                    Button(
+                        onClick = { permissionManager.requestBackgroundAppPermission() },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("🔋 Battery")
+                    }
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        // Background Processing Tests Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "🧪 Background Processing Tests",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = {
+                        Log.d("UI", "Schedule background chat task clicked")
+                        modelManager.scheduleBackgroundChatTask(
+                            prompt = "Write a short poem about artificial intelligence",
+                            priority = com.localllm.myapplication.data.Priority.NORMAL
+                        ) { result ->
+                            result.fold(
+                                onSuccess = { message ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Background task scheduled: $message",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                },
+                                onFailure = { error ->
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Failed to schedule: ${error.message}",
+                                        android.widget.Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text("🎭 Schedule Background Chat Task")
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(24.dp))
+        
+        // Close drawer button
+        OutlinedButton(
+            onClick = onCloseDrawer,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(
+                contentColor = MaterialTheme.colorScheme.error
+            )
+        ) {
+            Text("✖️ Close Menu")
         }
     }
 }
