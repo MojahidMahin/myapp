@@ -23,18 +23,9 @@ class PermissionManager(private val activity: Activity) {
         Log.d(TAG, "Starting comprehensive permission request flow")
         
         try {
-            // Start with notification permission first (most critical for background service)
-            requestNotificationPermission(
-                onSuccess = {
-                    Log.d(TAG, "Notification permission granted, app ready for background operation")
-                    onAllGranted()
-                },
-                onDenied = { denied ->
-                    Log.w(TAG, "Notification permission denied: $denied")
-                    onSomeDelayed(denied)
-                },
-                onError = onError
-            )
+            // Use the complete permission flow to request all permissions
+            val permissionFlow = PermissionFlow(onAllGranted, onSomeDelayed, onError)
+            permissionFlow.start()
         } catch (e: Exception) {
             Log.e(TAG, "Error in permission flow", e)
             onError(e)
@@ -102,7 +93,8 @@ class PermissionManager(private val activity: Activity) {
         grantResults: IntArray
     ) {
         when (requestCode) {
-            LocationPermissionCommand.REQUEST_CODE -> {
+            LocationPermissionCommand.REQUEST_CODE_FOREGROUND,
+            LocationPermissionCommand.REQUEST_CODE_BACKGROUND -> {
                 (currentPermissionCommand as? LocationPermissionCommand)
                     ?.handleRequestPermissionsResult(requestCode, permissions, grantResults)
             }

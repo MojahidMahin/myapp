@@ -53,9 +53,8 @@ class ChatActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isFinishing) {
-            // Clean up LLM resources when activity is finishing
-            AppContainer.cleanup()
-        }
+        // Don't cleanup AppContainer when activities finish - background service must persist
+        // Only cleanup when the entire app process is being destroyed
+        Log.d(TAG, "ChatActivity onDestroy called - background service will continue running")
     }
 }

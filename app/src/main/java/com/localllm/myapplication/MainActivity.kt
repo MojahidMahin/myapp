@@ -46,8 +46,7 @@ class MainActivity : ComponentActivity() {
         
         Log.d("MainActivity", "🌍 Universal app initialization for all Android devices")
         
-        // Start background service immediately (permissions will be requested later)
-        backgroundServiceManager.startBackgroundService()
+        // Background service is now started by MyApplication - no need to start here
         
         setContent {
             SignInScreen(authViewModel)
@@ -278,8 +277,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        if (isFinishing) {
-            AppContainer.cleanup()
-        }
+        // Don't cleanup AppContainer when activities finish - background service must persist
+        // Only cleanup when the entire app process is being destroyed
+        Log.d("MainActivity", "onDestroy called - background service will continue running")
     }
 }

@@ -111,10 +111,13 @@ class BackgroundService : Service() {
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
-            "Background Service",
+            "Workflow Automation",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
-            description = "Handles background workflows"
+            description = "Monitors triggers and executes automation workflows in the background"
+            enableLights(false)
+            enableVibration(false)
+            setShowBadge(false)
         }
         
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -122,16 +125,21 @@ class BackgroundService : Service() {
     }
 
     private fun createNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("MyApp Background Service")
-        .setContentText("Running background workflows")
-        .setSmallIcon(android.R.drawable.ic_dialog_info)
+        .setContentTitle("Workflow Automation Active")
+        .setContentText("Monitoring triggers and executing automation workflows")
+        .setSmallIcon(R.drawable.ic_launcher_foreground)
         .setContentIntent(
             PendingIntent.getActivity(
                 this, 0,
-                Intent(this, MainActivity::class.java),
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
                 PendingIntent.FLAG_IMMUTABLE
             )
         )
         .setOngoing(true)
+        .setPriority(NotificationCompat.PRIORITY_LOW)
+        .setCategory(NotificationCompat.CATEGORY_SERVICE)
+        .setShowWhen(false)
         .build()
 }

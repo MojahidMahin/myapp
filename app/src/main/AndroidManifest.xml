@@ -66,6 +66,7 @@
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
+        android:name=".MyApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
