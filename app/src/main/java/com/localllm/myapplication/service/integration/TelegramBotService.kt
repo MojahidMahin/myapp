@@ -85,7 +85,7 @@ class TelegramBotService(private val context: Context) {
                         telegramPrefs.saveBotToken(trimmedToken)
                         telegramPrefs.saveBotUsername(username)
                         
-                        Log.d(TAG, "Telegram bot initialized successfully: @$username")
+                        Log.d(TAG, "Telegram bot initialized successfully: @$username with token: ${getBotTokenMasked()}")
                         Result.success("Bot @$username connected successfully")
                     },
                     onFailure = { error ->
@@ -174,30 +174,53 @@ class TelegramBotService(private val context: Context) {
     suspend fun checkForNewMessages(condition: TelegramCondition, limit: Int = 10): Result<List<TelegramMessage>> {
         return withContext(Dispatchers.IO) {
             try {
+                Log.d(TAG, "📞 STEP 1: Checking for new Telegram messages")
+                Log.d(TAG, "🔍 Filter condition: $condition")
+                Log.d(TAG, "📊 Message limit: $limit")
+                
                 val token = botToken ?: return@withContext Result.failure(
                     Exception("Bot token not set. Please initialize bot first.")
                 )
                 
+                Log.d(TAG, "🔑 Bot token available: ${getBotTokenMasked()}")
+                
                 // Get updates from Telegram
+                Log.d(TAG, "📡 STEP 2: Fetching updates from Telegram API...")
                 val updates = getUpdates(limit)
                 updates.fold(
                     onSuccess = { messages ->
-                        // Filter messages based on conditions
-                        val filteredMessages = messages.filter { message ->
-                            matchesCondition(message, condition)
+                        Log.i(TAG, "✅ STEP 3: Received ${messages.size} raw messages from Telegram API")
+                        
+                        // Log all received messages
+                        messages.forEachIndexed { index, message ->
+                            Log.d(TAG, "📨 Raw Message $index: ID=${message.messageId}, From=${message.firstName}, Text='${message.text}', Chat=${message.chatId}")
                         }
                         
-                        Log.d(TAG, "Found ${filteredMessages.size} matching messages out of ${messages.size} total")
+                        // Filter messages based on conditions
+                        Log.d(TAG, "🔧 STEP 4: Filtering messages based on conditions...")
+                        val filteredMessages = messages.filter { message ->
+                            val matches = matchesCondition(message, condition)
+                            Log.d(TAG, "🎯 Message ${message.messageId} matches condition: $matches")
+                            matches
+                        }
+                        
+                        Log.i(TAG, "✅ STEP 5: Found ${filteredMessages.size} matching messages out of ${messages.size} total")
+                        
+                        // Log filtered messages details
+                        filteredMessages.forEach { message ->
+                            Log.i(TAG, "🎯 Filtered Message: ID=${message.messageId}, From=${message.firstName} (@${message.username}), Text='${message.text}', Timestamp=${message.timestamp}")
+                        }
+                        
                         Result.success(filteredMessages)
                     },
                     onFailure = { error ->
-                        Log.e(TAG, "Failed to check for new messages", error)
+                        Log.e(TAG, "❌ STEP 3: Failed to get updates from Telegram API", error)
                         Result.failure(error)
                     }
                 )
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Exception checking for new messages", e)
+                Log.e(TAG, "💥 STEP 1-2: Exception in checkForNewMessages", e)
                 Result.failure(e)
             }
         }
@@ -350,26 +373,18 @@ class TelegramBotService(private val context: Context) {
     }
     
     /**
-     * Send a text message
+     * Validate if a chat exists and bot has access to it
      */
-    suspend fun sendMessage(
-        chatId: Long,
-        text: String,
-        parseMode: String? = null, // "Markdown", "MarkdownV2", "HTML"
-        replyToMessageId: Long? = null
-    ): Result<Long> {
+    suspend fun validateChatAccess(chatId: Long): Result<Boolean> {
         return withContext(Dispatchers.IO) {
             try {
                 val token = botToken ?: return@withContext Result.failure(
-                    Exception("Bot token not set. Please initialize bot first.")
+                    Exception("Bot token not set")
                 )
                 
-                val url = "$TELEGRAM_API_BASE$token/sendMessage"
+                val url = "$TELEGRAM_API_BASE$token/getChat"
                 val requestJson = JSONObject().apply {
                     put("chat_id", chatId)
-                    put("text", text)
-                    parseMode?.let { put("parse_mode", it) }
-                    replyToMessageId?.let { put("reply_to_message_id", it) }
                 }
                 
                 val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
@@ -381,7 +396,77 @@ class TelegramBotService(private val context: Context) {
                 val response = httpClient.newCall(request).execute()
                 val responseBody = response.body?.string()
                 
+                if (response.isSuccessful) {
+                    val json = JSONObject(responseBody ?: "")
+                    if (json.getBoolean("ok")) {
+                        Log.d(TAG, "✅ Chat $chatId is accessible")
+                        Result.success(true)
+                    } else {
+                        Log.w(TAG, "⚠️ Chat $chatId not accessible: ${json.optString("description")}")
+                        Result.success(false)
+                    }
+                } else {
+                    Log.w(TAG, "⚠️ Chat $chatId validation failed: HTTP ${response.code}")
+                    Result.success(false)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error validating chat access", e)
+                Result.success(false) // Assume not accessible on error
+            }
+        }
+    }
+    
+    /**
+     * Send a text message
+     */
+    suspend fun sendMessage(
+        chatId: Long,
+        text: String,
+        parseMode: String? = null, // "Markdown", "MarkdownV2", "HTML"
+        replyToMessageId: Long? = null
+    ): Result<Long> {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.i(TAG, "📤 STEP A: Preparing to send Telegram message")
+                Log.d(TAG, "🎯 Target Chat ID: $chatId")
+                Log.d(TAG, "📝 Message Text: '$text'")
+                Log.d(TAG, "🎨 Parse Mode: $parseMode")
+                Log.d(TAG, "↩️ Reply To Message ID: $replyToMessageId")
+                
+                val token = botToken ?: return@withContext Result.failure(
+                    Exception("Bot token not set. Please initialize bot first.")
+                )
+                
+                Log.d(TAG, "🔑 Using bot token: ${getBotTokenMasked()}")
+                
+                val url = "$TELEGRAM_API_BASE$token/sendMessage"
+                val requestJson = JSONObject().apply {
+                    put("chat_id", chatId)
+                    put("text", text)
+                    parseMode?.let { put("parse_mode", it) }
+                    replyToMessageId?.let { put("reply_to_message_id", it) }
+                }
+                
+                Log.d(TAG, "🌐 STEP B: Making HTTP request to Telegram API")
+                Log.d(TAG, "📍 URL: $url")
+                Log.d(TAG, "📋 Request JSON: $requestJson")
+                
+                val requestBody = requestJson.toString().toRequestBody("application/json".toMediaType())
+                val request = Request.Builder()
+                    .url(url)
+                    .post(requestBody)
+                    .build()
+                
+                val response = httpClient.newCall(request).execute()
+                val responseBody = response.body?.string()
+                
+                Log.d(TAG, "📡 STEP C: Received HTTP response")
+                Log.d(TAG, "📊 Response Code: ${response.code}")
+                Log.d(TAG, "📄 Response Body: $responseBody")
+                
                 if (!response.isSuccessful) {
+                    Log.e(TAG, "❌ STEP C: HTTP request failed with code ${response.code}")
+                    Log.e(TAG, "💬 Error details: $responseBody")
                     return@withContext Result.failure(
                         Exception("HTTP ${response.code}: $responseBody")
                     )
@@ -389,6 +474,8 @@ class TelegramBotService(private val context: Context) {
                 
                 val json = JSONObject(responseBody ?: "")
                 if (!json.getBoolean("ok")) {
+                    Log.e(TAG, "❌ STEP D: Telegram API returned error")
+                    Log.e(TAG, "💬 API error: ${json.optString("description")}")
                     return@withContext Result.failure(
                         Exception("Telegram API error: ${json.optString("description")}")
                     )
@@ -397,11 +484,15 @@ class TelegramBotService(private val context: Context) {
                 val result = json.getJSONObject("result")
                 val messageId = result.getLong("message_id")
                 
-                Log.d(TAG, "Message sent successfully. Message ID: $messageId")
+                Log.i(TAG, "✅ STEP E: Message sent successfully!")
+                Log.i(TAG, "🆔 Message ID: $messageId")
+                Log.i(TAG, "🎯 Sent to Chat: $chatId")
                 Result.success(messageId)
                 
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to send message", e)
+                Log.e(TAG, "💥 STEP A-E: Exception in sendMessage", e)
+                Log.e(TAG, "🔍 Exception details: ${e.message}")
+                Log.e(TAG, "📍 Stack trace: ${e.stackTraceToString()}")
                 Result.failure(e)
             }
         }
@@ -532,17 +623,18 @@ class TelegramBotService(private val context: Context) {
     fun getBotUsername(): String? = botUsername
     
     /**
-     * Get bot token (masked for security)
+     * Get masked bot token for logging (security)
      */
-    fun getBotTokenMasked(): String? {
+    private fun getBotTokenMasked(): String {
         return botToken?.let { token ->
-            if (token.length > 10) {
-                "${token.take(5)}...${token.takeLast(5)}"
+            if (token.length > 8) {
+                "${token.take(4)}...${token.takeLast(4)}"
             } else {
-                "***"
+                "****"
             }
-        }
+        } ?: "Not Set"
     }
+    
     
     /**
      * Clear all pending updates to resolve conflicts

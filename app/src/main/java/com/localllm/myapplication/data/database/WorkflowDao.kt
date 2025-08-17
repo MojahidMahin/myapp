@@ -118,6 +118,33 @@ interface ProcessedEmailDao {
 }
 
 @Dao
+interface ProcessedTelegramMessageDao {
+    @Query("SELECT * FROM processed_telegram_messages WHERE messageId = :messageId")
+    suspend fun isTelegramMessageProcessed(messageId: String): ProcessedTelegramMessageEntity?
+    
+    @Query("SELECT * FROM processed_telegram_messages WHERE telegramMessageId = :telegramMessageId AND chatId = :chatId AND workflowId = :workflowId")
+    suspend fun isSpecificMessageProcessed(telegramMessageId: Long, chatId: Long, workflowId: String): ProcessedTelegramMessageEntity?
+    
+    @Query("SELECT * FROM processed_telegram_messages WHERE workflowId = :workflowId ORDER BY processedAt DESC LIMIT :limit")
+    suspend fun getProcessedMessages(workflowId: String, limit: Int): List<ProcessedTelegramMessageEntity>
+    
+    @Query("SELECT * FROM processed_telegram_messages WHERE userId = :userId AND workflowId = :workflowId ORDER BY processedAt DESC")
+    suspend fun getProcessedMessagesByUser(userId: String, workflowId: String): List<ProcessedTelegramMessageEntity>
+    
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertProcessedMessage(message: ProcessedTelegramMessageEntity)
+    
+    @Query("DELETE FROM processed_telegram_messages WHERE processedAt < :cutoffTime")
+    suspend fun deleteOldProcessedMessages(cutoffTime: Long)
+    
+    @Query("DELETE FROM processed_telegram_messages WHERE workflowId = :workflowId")
+    suspend fun deleteProcessedMessagesForWorkflow(workflowId: String)
+    
+    @Query("SELECT COUNT(*) FROM processed_telegram_messages WHERE workflowId = :workflowId")
+    suspend fun getProcessedMessageCount(workflowId: String): Int
+}
+
+@Dao
 interface ContactDao {
     @Query("SELECT * FROM contacts ORDER BY name COLLATE NOCASE ASC")
     suspend fun getAllContacts(): List<ContactEntity>

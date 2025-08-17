@@ -431,12 +431,12 @@ class WorkflowValidator(private val context: Context) {
                                 suggestedFix = "Verify the target user ID exists"
                             )
                         )
-                    } else if (!user.telegramConnected) {
+                    } else if (!user.telegramConnected || user.telegramUserId == null) {
                         warnings.add(
                             ValidationWarning(
                                 "TELEGRAM_NOT_CONNECTED",
-                                "Target user for Telegram action at index $index doesn't have Telegram connected",
-                                "Ensure the target user has connected their Telegram account"
+                                "Target user for Telegram action at index $index doesn't have Telegram connected properly. Will use fallback to source chat.",
+                                "For best results, ensure the target user has connected their Telegram account and started a chat with the bot"
                             )
                         )
                     }

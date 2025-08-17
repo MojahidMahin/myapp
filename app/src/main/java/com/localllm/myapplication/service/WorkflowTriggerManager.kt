@@ -32,6 +32,7 @@ class WorkflowTriggerManager(
     
     private val workManager = WorkManager.getInstance(context)
     private val emailDeduplicationService = EmailDeduplicationService(context)
+    private val telegramDeduplicationService = TelegramDeduplicationService(context)
     
     // Rate limiting for email checks
     private val lastEmailCheckTimes = mutableMapOf<String, Long>()
@@ -96,10 +97,11 @@ class WorkflowTriggerManager(
                     }
                 )
                 
-                // Cleanup old processed emails periodically (every hour)
+                // Cleanup old processed emails and messages periodically (every hour)
                 if (System.currentTimeMillis() % (60 * 60 * 1000) < 30000) {
-                    Log.d(TAG, "Running periodic cleanup of old processed emails")
+                    Log.d(TAG, "Running periodic cleanup of old processed emails and messages")
                     emailDeduplicationService.cleanupOldRecords()
+                    telegramDeduplicationService.cleanupOldRecords()
                 }
                 
                 Log.d(TAG, "=== TRIGGER CYCLE END - Next check in 30 seconds ===")
@@ -529,8 +531,16 @@ class WorkflowTriggerManager(
         trigger: MultiUserTrigger.UserTelegramMessage
     ): TriggerExecutionResult {
         return try {
+            Log.i(TAG, "🚀 === TELEGRAM TRIGGER CHECK START ===")
+            Log.i(TAG, "📋 Workflow: ${workflow.name} (ID: ${workflow.id})")
+            Log.i(TAG, "👤 User: ${trigger.userId}")
+            Log.i(TAG, "🔍 Trigger condition: ${trigger.condition}")
+            
+            Log.d(TAG, "🔎 STEP T1: Getting Telegram service for user ${trigger.userId}")
             val telegramService = userManager.getTelegramService(trigger.userId)
             if (telegramService == null) {
+                Log.e(TAG, "❌ STEP T1: Telegram service not available for user: ${trigger.userId}")
+                Log.e(TAG, "💡 Solution: User needs to connect Telegram account")
                 return TriggerExecutionResult(
                     workflow.id, 
                     "UserTelegramMessage", 
@@ -539,18 +549,99 @@ class WorkflowTriggerManager(
                 )
             }
             
-            // Check for new messages based on condition
-            val hasNewMessages = checkTelegramCondition(telegramService, trigger.condition)
+            Log.i(TAG, "✅ STEP T1: Telegram service available")
+            Log.d(TAG, "🤖 Bot status: ${if (telegramService.isInitialized()) "Connected" else "Not Connected"}")
+            Log.d(TAG, "👤 Bot username: ${telegramService.getBotUsername()}")
             
-            if (hasNewMessages) {
-                executeWorkflow(workflow, trigger.userId, "Telegram trigger - new message")
-            } else {
-                TriggerExecutionResult(workflow.id, "UserTelegramMessage", false, "No matching messages found")
-            }
+            Log.d(TAG, "📞 STEP T2: Checking for new messages...")
+            
+            // Check for new messages based on condition
+            val messagesResult = telegramService.checkForNewMessages(trigger.condition, 5)
+            messagesResult.fold(
+                onSuccess = { messages ->
+                    Log.i(TAG, "✅ STEP T2: Telegram API returned ${messages.size} messages")
+                    
+                    // Use deduplication service to filter new messages
+                    Log.d(TAG, "🔄 STEP T3: Filtering messages for duplicates...")
+                    val newMessages = telegramDeduplicationService.filterNewTelegramMessages(messages, workflow.id)
+                    
+                    Log.i(TAG, "🎯 STEP T3: Found ${newMessages.size} NEW unprocessed messages (${messages.size - newMessages.size} already processed)")
+                    
+                    if (newMessages.isNotEmpty()) {
+                        val latestMessage = newMessages.first()
+                        Log.i(TAG, "🎉 STEP T4: PROCESSING NEW TELEGRAM MESSAGE:")
+                        Log.i(TAG, "🆔 Message ID: ${latestMessage.messageId}")
+                        Log.i(TAG, "👤 From: ${latestMessage.firstName} ${latestMessage.lastName ?: ""} (@${latestMessage.username ?: "no_username"})")
+                        Log.i(TAG, "💬 Chat ID: ${latestMessage.chatId}")
+                        Log.i(TAG, "📝 Text: '${latestMessage.text}'")
+                        Log.i(TAG, "⏰ Timestamp: ${latestMessage.timestamp}")
+                        Log.i(TAG, "🔢 User ID: ${latestMessage.userId}")
+                        Log.i(TAG, "🤖 Is Bot: ${latestMessage.isBot}")
+                        
+                        // Mark this message as processed BEFORE executing workflow
+                        Log.d(TAG, "💾 STEP T5: Marking message as processed...")
+                        val marked = telegramDeduplicationService.markTelegramMessageAsProcessed(
+                            telegramMessageId = latestMessage.messageId,
+                            chatId = latestMessage.chatId,
+                            workflowId = workflow.id,
+                            userId = trigger.userId,
+                            senderName = "${latestMessage.firstName} ${latestMessage.lastName ?: ""}".trim(),
+                            senderUsername = latestMessage.username,
+                            messageText = latestMessage.text,
+                            messageTimestamp = latestMessage.timestamp
+                        )
+                        
+                        if (!marked) {
+                            Log.e(TAG, "❌ STEP T5: Failed to mark Telegram message as processed, skipping workflow execution")
+                            return TriggerExecutionResult(workflow.id, "UserTelegramMessage", false, "Failed to mark message as processed")
+                        }
+                        
+                        Log.i(TAG, "✅ STEP T5: Telegram message ${latestMessage.messageId} marked as processed")
+                        
+                        // Create trigger data with message details
+                        Log.d(TAG, "🏗️ STEP T6: Building trigger data...")
+                        val triggerData = mapOf(
+                            "source" to "telegram",
+                            "telegram_message" to latestMessage.text,
+                            "telegram_sender_name" to "${latestMessage.firstName} ${latestMessage.lastName ?: ""}".trim(),
+                            "telegram_username" to (latestMessage.username ?: ""),
+                            "telegram_user_id" to latestMessage.userId.toString(),
+                            "telegram_chat_id" to latestMessage.chatId.toString(),
+                            "telegram_message_id" to latestMessage.messageId.toString(),
+                            "telegram_timestamp" to java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(latestMessage.timestamp)),
+                            "type" to "telegram_message"
+                        )
+                        
+                        Log.i(TAG, "🚀 STEP T7: EXECUTING WORKFLOW for Telegram message ${latestMessage.messageId}")
+                        Log.i(TAG, "📋 === TRIGGER DATA SUMMARY ===")
+                        triggerData.forEach { (key, value) ->
+                            Log.d(TAG, "📄 $key: '$value'")
+                        }
+                        Log.i(TAG, "📋 === END TRIGGER DATA SUMMARY ===")
+                        
+                        executeWorkflowWithData(workflow, trigger.userId, triggerData)
+                    } else {
+                        Log.w(TAG, "⚠️ STEP T4: No new unprocessed messages found for workflow: ${workflow.name}")
+                        Log.d(TAG, "💡 All ${messages.size} messages were already processed previously")
+                        TriggerExecutionResult(workflow.id, "UserTelegramMessage", false, "No new messages (all already processed)")
+                    }
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "❌ STEP T2: FAILED to check Telegram messages")
+                    Log.e(TAG, "💥 Error details: ${error.message}")
+                    Log.e(TAG, "🔍 Error type: ${error.javaClass.simpleName}")
+                    TriggerExecutionResult(workflow.id, "UserTelegramMessage", false, "Failed to check messages: ${error.message}")
+                }
+            )
             
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking Telegram trigger", e)
+            Log.e(TAG, "💥 STEP T1-T7: EXCEPTION in Telegram trigger check")
+            Log.e(TAG, "🔍 Exception type: ${e.javaClass.simpleName}")
+            Log.e(TAG, "💬 Exception message: ${e.message}")
+            Log.e(TAG, "📍 Stack trace: ${e.stackTraceToString()}")
             TriggerExecutionResult(workflow.id, "UserTelegramMessage", false, "Error: ${e.message}")
+        } finally {
+            Log.i(TAG, "🏁 === TELEGRAM TRIGGER CHECK END ===")
         }
     }
     

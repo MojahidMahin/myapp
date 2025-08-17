@@ -11,9 +11,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         WorkflowEntity::class,
         WorkflowExecutionEntity::class,
         ProcessedEmailEntity::class,
+        ProcessedTelegramMessageEntity::class,
         ContactEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class WorkflowDatabase : RoomDatabase() {
@@ -21,6 +22,7 @@ abstract class WorkflowDatabase : RoomDatabase() {
     abstract fun workflowDao(): WorkflowDao
     abstract fun workflowExecutionDao(): WorkflowExecutionDao
     abstract fun processedEmailDao(): ProcessedEmailDao
+    abstract fun processedTelegramMessageDao(): ProcessedTelegramMessageDao
     abstract fun contactDao(): ContactDao
     
     companion object {

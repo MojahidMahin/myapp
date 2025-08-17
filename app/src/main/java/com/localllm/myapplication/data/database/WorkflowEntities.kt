@@ -207,6 +207,20 @@ data class ProcessedEmailEntity(
     val triggerTimestamp: Long // When the email was originally received
 )
 
+@Entity(tableName = "processed_telegram_messages")
+data class ProcessedTelegramMessageEntity(
+    @PrimaryKey val messageId: String, // Combination of chatId_messageId_workflowId for uniqueness
+    val telegramMessageId: Long, // Original Telegram message ID
+    val chatId: Long,
+    val workflowId: String,
+    val userId: String,
+    val senderName: String,
+    val senderUsername: String?,
+    val messageText: String,
+    val processedAt: Long = System.currentTimeMillis(),
+    val triggerTimestamp: Long // When the message was originally sent
+)
+
 @Entity(tableName = "contacts")
 data class ContactEntity(
     @PrimaryKey val id: String,

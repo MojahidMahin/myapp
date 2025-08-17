@@ -302,6 +302,83 @@ object WorkflowTemplates {
     }
     
     /**
+     * Template: Telegram to Telegram message forwarding
+     */
+    fun createTelegramToTelegramTemplate(creatorUserId: String, targetUserId: String): MultiUserWorkflow {
+        return MultiUserWorkflow(
+            id = UUID.randomUUID().toString(),
+            name = "Telegram → Telegram Forwarder",
+            description = "Forward new Telegram messages to another user automatically",
+            createdBy = creatorUserId,
+            workflowType = WorkflowType.CROSS_USER,
+            sharedWith = listOf(targetUserId),
+            triggers = listOf(
+                MultiUserTrigger.UserTelegramMessage(
+                    userId = creatorUserId,
+                    condition = TelegramBotService.TelegramCondition(
+                        chatTypeFilter = "private"
+                    )
+                )
+            ),
+            actions = listOf(
+                MultiUserAction.AIAnalyzeText(
+                    inputText = "{{telegram_message}}",
+                    analysisPrompt = "Analyze this message and extract key information, sentiment, and urgency level. Provide a brief summary.",
+                    outputVariable = "message_analysis"
+                ),
+                MultiUserAction.SendToUserTelegram(
+                    targetUserId = targetUserId,
+                    text = "📨 New Message Forwarded\n\nFrom: {{telegram_sender_name}} (@{{telegram_username}})\nMessage: {{telegram_message}}\n\n🤖 AI Analysis: {{message_analysis}}\n\nTimestamp: {{telegram_timestamp}}"
+                )
+            )
+        )
+    }
+    
+    /**
+     * Template: Smart Telegram message relay with keywords
+     */
+    fun createSmartTelegramRelayTemplate(creatorUserId: String, targetUserId: String, keywords: List<String> = listOf("urgent", "important", "help")): MultiUserWorkflow {
+        return MultiUserWorkflow(
+            id = UUID.randomUUID().toString(),
+            name = "Smart Telegram Relay",
+            description = "Forward Telegram messages containing specific keywords to another user",
+            createdBy = creatorUserId,
+            workflowType = WorkflowType.CROSS_USER,
+            sharedWith = listOf(targetUserId),
+            triggers = listOf(
+                MultiUserTrigger.UserTelegramMessage(
+                    userId = creatorUserId,
+                    condition = TelegramBotService.TelegramCondition(
+                        textContains = keywords.joinToString("|")
+                    )
+                )
+            ),
+            actions = listOf(
+                MultiUserAction.AIExtractKeywords(
+                    text = "{{telegram_message}}",
+                    count = 3,
+                    outputVariable = "message_keywords"
+                ),
+                MultiUserAction.AISentimentAnalysis(
+                    text = "{{telegram_message}}",
+                    outputVariable = "message_sentiment"
+                ),
+                MultiUserAction.ConditionalAction(
+                    condition = "message_sentiment == urgent",
+                    trueAction = MultiUserAction.SendToUserTelegram(
+                        targetUserId = targetUserId,
+                        text = "🚨 URGENT MESSAGE RELAY\n\nFrom: {{telegram_sender_name}}\nMessage: {{telegram_message}}\n\nKeywords: {{message_keywords}}\nSentiment: {{message_sentiment}}\n\n⚡ This message was flagged as urgent!"
+                    ),
+                    falseAction = MultiUserAction.SendToUserTelegram(
+                        targetUserId = targetUserId,
+                        text = "📋 Message Relay\n\nFrom: {{telegram_sender_name}}\nMessage: {{telegram_message}}\n\nKeywords: {{message_keywords}}\nSentiment: {{message_sentiment}}"
+                    )
+                )
+            )
+        )
+    }
+    
+    /**
      * Get all available templates
      */
     fun getAllTemplates(): List<WorkflowTemplate> {
@@ -382,6 +459,28 @@ object WorkflowTemplates {
                 optionalUsers = 10,
                 estimatedSetupTime = "4 minutes",
                 tags = listOf("meetings", "scheduling", "telegram", "team")
+            ),
+            WorkflowTemplate(
+                id = "telegram-to-telegram",
+                name = "Telegram → Telegram Forwarder",
+                description = "Forward new Telegram messages to another user automatically",
+                category = "Message Forwarding",
+                platforms = listOf(Platform.TELEGRAM),
+                requiredUsers = 2,
+                optionalUsers = 0,
+                estimatedSetupTime = "2 minutes",
+                tags = listOf("telegram", "forwarding", "automation", "relay")
+            ),
+            WorkflowTemplate(
+                id = "smart-telegram-relay",
+                name = "Smart Telegram Relay",
+                description = "Forward Telegram messages with specific keywords to another user",
+                category = "Smart Filtering",
+                platforms = listOf(Platform.TELEGRAM),
+                requiredUsers = 2,
+                optionalUsers = 0,
+                estimatedSetupTime = "3 minutes",
+                tags = listOf("telegram", "keywords", "ai", "smart-filtering", "relay")
             )
         )
     }
@@ -415,6 +514,16 @@ object WorkflowTemplates {
                 createTranslationWorkflowTemplate(creatorUserId, targetUserId)
             }
             "meeting-scheduler" -> createMeetingSchedulerTemplate(creatorUserId, targetUserIds)
+            "telegram-to-telegram" -> {
+                val targetUserId = targetUserIds.firstOrNull()
+                    ?: return null
+                createTelegramToTelegramTemplate(creatorUserId, targetUserId)
+            }
+            "smart-telegram-relay" -> {
+                val targetUserId = targetUserIds.firstOrNull()
+                    ?: return null
+                createSmartTelegramRelayTemplate(creatorUserId, targetUserId)
+            }
             else -> null
         }
     }
