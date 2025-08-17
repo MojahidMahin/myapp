@@ -749,24 +749,54 @@ class MultiUserWorkflowEngine(
         return try {
             Log.d(TAG, "Executing Auto Email Summarizer action")
             
-            // Get email data from trigger context
+            // Get email data from trigger context with detailed debugging
+            Log.d(TAG, "=== EXTRACTING EMAIL DATA FROM CONTEXT ===")
+            Log.d(TAG, "Available context variables: ${context.variables.keys}")
+            
             val emailSubject = context.variables["email_subject"] ?: ""
             val emailBody = context.variables["email_body"] ?: ""
             val emailFrom = context.variables["email_from"] ?: ""
             
+            Log.d(TAG, "Extracted email_subject: '$emailSubject'")
+            Log.d(TAG, "Extracted email_body length: ${emailBody.length} characters")
+            Log.d(TAG, "Extracted email_body preview: '${emailBody.take(200)}${if (emailBody.length > 200) "..." else ""}'")
+            Log.d(TAG, "Extracted email_from: '$emailFrom'")
+            
             if (emailBody.isEmpty()) {
+                Log.e(TAG, "❌ EMAIL BODY IS EMPTY!")
+                Log.e(TAG, "Context variables dump: ${context.variables}")
                 Log.w(TAG, "No email content found in trigger context")
                 return Result.failure(Exception("No email content available for summarization"))
+            } else {
+                Log.d(TAG, "✅ Email body extracted successfully (${emailBody.length} chars)")
             }
             
             // Initialize summarization service
             val modelManager = com.localllm.myapplication.di.AppContainer.provideModelManager(this.context)
             val summarizationService = com.localllm.myapplication.service.ai.LocalLLMSummarizationService(modelManager, this.context)
             
-            // Create email content for summarization
-            val emailContent = "Subject: $emailSubject\nFrom: $emailFrom\n\n$emailBody"
+            // Create concise email content for LLM understanding
+            val emailContent = buildString {
+                appendLine("FROM: $emailFrom")
+                appendLine("SUBJECT: $emailSubject")
+                appendLine("BODY: ${emailBody.trim()}")
+            }
             
-            // Summarize the email
+            Log.d(TAG, "=== STARTING EMAIL SUMMARIZATION ===")
+            Log.d(TAG, "Email content length: ${emailContent.length} characters")
+            Log.d(TAG, "Email body length: ${emailBody.length} characters")
+            Log.d(TAG, "Subject: '$emailSubject'")
+            Log.d(TAG, "Sender: '$emailFrom'")
+            Log.d(TAG, "Max summary length: ${action.maxSummaryLength}")
+            Log.d(TAG, "Summary style: ${action.summaryStyle}")
+            Log.d(TAG, "Email body preview: '${emailBody.take(200)}${if (emailBody.length > 200) "..." else ""}'")
+            
+            Log.d(TAG, "=== FULL EMAIL CONTENT BEING SENT TO LLM ===")
+            Log.d(TAG, "Complete emailContent:")
+            Log.d(TAG, emailContent)
+            Log.d(TAG, "=== END OF EMAIL CONTENT ===")
+            
+            // Summarize the email using local LLM
             val summaryResult = summarizationService.summarizeText(
                 text = emailContent,
                 maxLength = action.maxSummaryLength,
@@ -777,11 +807,15 @@ class MultiUserWorkflowEngine(
                 }
             )
             
+            Log.d(TAG, "Summarization result: ${if (summaryResult.isSuccess) "SUCCESS" else "FAILED"}")
+            
             if (summaryResult.isFailure) {
-                Log.w(TAG, "AI summarization failed, workflow will continue with fallback: ${summaryResult.exceptionOrNull()?.message}")
-                // Don't fail the entire workflow, use fallback summary
+                Log.e(TAG, "AI summarization failed: ${summaryResult.exceptionOrNull()?.message}", summaryResult.exceptionOrNull())
+                Log.w(TAG, "Workflow will continue with fallback summarization")
+                
+                // Use fallback summary when AI fails
                 val fallbackSummary = createFallbackEmailSummary(emailSubject, emailBody, emailFrom)
-                Log.i(TAG, "Using fallback email summary")
+                Log.i(TAG, "Generated fallback summary: ${fallbackSummary.take(100)}...")
                 context.variables[action.summaryOutputVariable] = fallbackSummary
                 
                 // Continue with fallback summary instead of failing
@@ -856,52 +890,74 @@ class MultiUserWorkflowEngine(
      * Create fallback email summary when AI is not available
      */
     private fun createFallbackEmailSummary(subject: String, body: String, sender: String): String {
-        Log.d(TAG, "Creating fallback email summary")
+        Log.d(TAG, "Creating intelligent fallback email summary")
+        Log.d(TAG, "Fallback input - Subject: '$subject', Body length: ${body.length}, Sender: '$sender'")
         
         return buildString {
-            append("📧 Email Summary (Generated without AI)\n\n")
+            // Start with a more natural summary approach
+            append("📧 Email Summary\n\n")
             
-            // Add sender info
-            if (sender.isNotBlank()) {
-                append("From: $sender\n")
-            }
+            // Analyze the email content more intelligently
+            val cleanBody = body.trim()
             
-            // Add subject
-            if (subject.isNotBlank()) {
-                append("Subject: $subject\n\n")
-            }
-            
-            // Create basic summary from body
-            if (body.isNotBlank()) {
-                val cleanBody = body.trim()
+            // Extract meaningful content
+            if (cleanBody.isNotBlank()) {
+                // Look for key patterns in email content
                 val sentences = cleanBody.split(Regex("[.!?]+"))
                     .map { it.trim() }
-                    .filter { it.isNotEmpty() && it.length > 10 }
+                    .filter { it.isNotEmpty() && it.length > 15 }
+                
+                // Analyze content for important information
+                val keywordPatterns = listOf(
+                    "request", "please", "need", "want", "would like", "asking",
+                    "meeting", "call", "schedule", "time", "date",
+                    "project", "work", "task", "assignment",
+                    "urgent", "important", "asap", "immediately",
+                    "question", "help", "support", "issue", "problem"
+                )
+                
+                val importantSentences = sentences.take(3).filter { sentence ->
+                    // Prioritize sentences with keywords or questions
+                    keywordPatterns.any { keyword -> 
+                        sentence.lowercase().contains(keyword.lowercase()) 
+                    } || sentence.contains("?") || sentence.length > 30
+                }
                 
                 when {
-                    sentences.isEmpty() -> {
-                        // Fallback to first 100 characters
-                        val preview = cleanBody.take(100)
-                        append("Content: $preview")
-                        if (cleanBody.length > 100) append("...")
-                    }
-                    sentences.size == 1 -> {
-                        append("Content: ${sentences[0]}")
-                    }
-                    else -> {
-                        // Take first 2 most important sentences
-                        val importantSentences = sentences.take(2)
-                        append("Key Points:\n")
+                    importantSentences.isNotEmpty() -> {
+                        append("📝 Main Content:\n")
                         importantSentences.forEach { sentence ->
-                            append("• $sentence\n")
+                            append("• $sentence.\n")
                         }
                     }
+                    sentences.isNotEmpty() -> {
+                        append("📝 Content Preview:\n")
+                        append("• ${sentences.first()}.\n")
+                        if (sentences.size > 1) {
+                            append("• ${sentences[1]}.\n")
+                        }
+                    }
+                    else -> {
+                        // Extract first meaningful paragraph
+                        val preview = cleanBody.take(150)
+                        append("📝 Content: $preview")
+                        if (cleanBody.length > 150) append("...")
+                        append("\n")
+                    }
                 }
+                
+                // Add metadata
+                append("\n📋 Details:\n")
+                append("• From: $sender\n")
+                append("• Subject: $subject\n")
+                append("• Content Length: ${cleanBody.length} characters\n")
+                
             } else {
-                append("Content: No email content available")
+                append("📝 Content: Email appears to be empty or contains only formatting.\n")
+                append("\n📋 Details:\n")
+                append("• From: $sender\n")
+                append("• Subject: $subject\n")
             }
-            
-            append("\n\n⚠️ Note: This summary was generated using basic text processing because AI model is not currently available.")
         }
     }
     

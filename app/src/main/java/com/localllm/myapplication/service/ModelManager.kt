@@ -479,10 +479,30 @@ class ModelManager private constructor(private val context: Context) {
         val runtime = Runtime.getRuntime()
         val maxMemory = runtime.maxMemory() / (1024 * 1024)
         
+        // Check if this is an email summarization prompt
+        val isEmailContent = prompt.contains("Summarize the key points") ||
+                            (prompt.contains("FROM:", ignoreCase = true) && 
+                             prompt.contains("SUBJECT:", ignoreCase = true) && 
+                             prompt.contains("BODY:", ignoreCase = true))
+        
         val optimizedPrompt = when {
             maxMemory > 1024 -> prompt // High-end: use full prompt
-            maxMemory > 512 && prompt.length > 500 -> prompt.take(500) + "..." // Mid-range: moderate truncation
-            prompt.length > 300 -> prompt.take(300) + "..." // Budget: aggressive truncation
+            maxMemory > 512 && prompt.length > 500 -> {
+                if (isEmailContent) {
+                    // For email content, be more generous with length
+                    prompt.take(800) + "..."
+                } else {
+                    prompt.take(500) + "..."
+                }
+            }
+            prompt.length > 300 -> {
+                if (isEmailContent) {
+                    // For email content, preserve more context even on budget devices
+                    prompt.take(600) + "..."
+                } else {
+                    prompt.take(300) + "..."
+                }
+            }
             else -> prompt
         }
         

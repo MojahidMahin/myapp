@@ -8,6 +8,8 @@ import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.resume
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,6 +29,9 @@ class MediaPipeLLMService(private val context: Context) {
     private var llmSession: LlmInferenceSession? = null
     private var isInitialized = false
     private val shouldStop = AtomicBoolean(false)
+    
+    // Mutex to serialize access to the LLM session (MediaPipe can't handle concurrent requests)
+    private val sessionMutex = Mutex()
     
     suspend fun initialize(modelPath: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -83,13 +88,16 @@ class MediaPipeLLMService(private val context: Context) {
         images: List<Bitmap> = emptyList(),
         onPartialResult: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            if (!isInitialized || llmSession == null) {
-                return@withContext Result.failure(Exception("LLM not initialized"))
-            }
-            
-            Log.d(TAG, "🤖 Generating response with MediaPipe LLM for: ${prompt.take(50)}...")
-            shouldStop.set(false)
+        // Use mutex to serialize access to the MediaPipe LLM session
+        sessionMutex.withLock {
+            try {
+                if (!isInitialized || llmSession == null) {
+                    return@withContext Result.failure(Exception("LLM not initialized"))
+                }
+                
+                Log.d(TAG, "🤖 Generating response with MediaPipe LLM for: ${prompt.take(50)}...")
+                Log.d(TAG, "🔒 Acquired session lock for request")
+                shouldStop.set(false)
             
             // Add text query
             if (prompt.trim().isNotEmpty()) {
@@ -155,10 +163,13 @@ class MediaPipeLLMService(private val context: Context) {
                 }
             }
             
+            Log.d(TAG, "🔓 Releasing session lock")
             Result.success(finalResponse)
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ Failed to generate response with MediaPipe LLM", e)
-            Result.failure(e)
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Failed to generate response with MediaPipe LLM", e)
+                Log.d(TAG, "🔓 Releasing session lock due to error")
+                Result.failure(e)
+            }
         }
     }
     

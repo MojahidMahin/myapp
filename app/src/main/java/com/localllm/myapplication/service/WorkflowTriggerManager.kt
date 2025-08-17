@@ -362,6 +362,13 @@ class WorkflowTriggerManager(
                         )
                         
                         Log.i(TAG, "EXECUTING WORKFLOW for email ${latestEmail.id}")
+                        Log.d(TAG, "=== TRIGGER DATA DEBUG ===")
+                        Log.d(TAG, "email_subject: '${triggerData["email_subject"]}'")
+                        Log.d(TAG, "email_body length: ${(triggerData["email_body"] as? String)?.length ?: 0} characters")
+                        Log.d(TAG, "email_body preview: '${(triggerData["email_body"] as? String)?.take(200) ?: "null"}${if ((triggerData["email_body"] as? String)?.length ?: 0 > 200) "..." else ""}'")
+                        Log.d(TAG, "email_from: '${triggerData["email_from"]}'")
+                        Log.d(TAG, "=== END TRIGGER DATA DEBUG ===")
+                        
                         executeWorkflowWithData(workflow, trigger.userId, triggerData)
                     } else {
                         Log.d(TAG, "No new unprocessed emails found for workflow: ${workflow.name}")
@@ -487,6 +494,13 @@ class WorkflowTriggerManager(
                         )
                         
                         Log.i(TAG, "EXECUTING WORKFLOW for email ${latestEmail.id}")
+                        Log.d(TAG, "=== TRIGGER DATA DEBUG (EMAIL_RECEIVED) ===")
+                        Log.d(TAG, "email_subject: '${triggerData["email_subject"]}'")
+                        Log.d(TAG, "email_body length: ${(triggerData["email_body"] as? String)?.length ?: 0} characters")
+                        Log.d(TAG, "email_body preview: '${(triggerData["email_body"] as? String)?.take(200) ?: "null"}${if ((triggerData["email_body"] as? String)?.length ?: 0 > 200) "..." else ""}'")
+                        Log.d(TAG, "email_from: '${triggerData["email_from"]}'")
+                        Log.d(TAG, "=== END TRIGGER DATA DEBUG ===")
+                        
                         executeWorkflowWithData(workflow, trigger.userId, triggerData)
                     } else {
                         Log.d(TAG, "No new unprocessed emails found for workflow: ${workflow.name}")

@@ -25,9 +25,13 @@
       "Bash(rm:*)",
       "Bash(cd:*)",
       "Bash(cd:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(cp:*)"
     ],
     "deny": [],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "/run/media/vortex/CSE/CSE"
+    ]
   }
 }
