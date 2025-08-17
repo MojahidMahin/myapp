@@ -163,8 +163,45 @@ class GmailIntegrationService(private val context: Context) {
                 // Build query string
                 val queryBuilder = mutableListOf<String>()
                 if (condition.isUnreadOnly) queryBuilder.add("is:unread")
-                condition.fromFilter?.let { queryBuilder.add("from:$it") }
-                condition.subjectFilter?.let { queryBuilder.add("subject:$it") }
+                
+                // Enhanced sender filtering - handle multiple formats
+                condition.fromFilter?.let { fromFilter ->
+                    val cleanFilter = fromFilter.trim()
+                    when {
+                        cleanFilter.contains("@") -> {
+                            // Email address filter
+                            queryBuilder.add("from:$cleanFilter")
+                        }
+                        cleanFilter.contains(" ") -> {
+                            // Full name filter (use quotes for exact match)
+                            queryBuilder.add("from:\"$cleanFilter\"")
+                        }
+                        else -> {
+                            // Partial name filter
+                            queryBuilder.add("from:$cleanFilter")
+                        }
+                    }
+                }
+                
+                // Enhanced subject filtering - handle keywords and phrases
+                condition.subjectFilter?.let { subjectFilter ->
+                    val cleanFilter = subjectFilter.trim()
+                    when {
+                        cleanFilter.startsWith("\"") && cleanFilter.endsWith("\"") -> {
+                            // Exact phrase already quoted
+                            queryBuilder.add("subject:$cleanFilter")
+                        }
+                        cleanFilter.contains(" ") -> {
+                            // Multi-word phrase - add quotes for exact match
+                            queryBuilder.add("subject:\"$cleanFilter\"")
+                        }
+                        else -> {
+                            // Single keyword
+                            queryBuilder.add("subject:$cleanFilter")
+                        }
+                    }
+                }
+                
                 condition.bodyFilter?.let { queryBuilder.add("$it") }
                 condition.labelFilter?.let { queryBuilder.add("label:$it") }
                 
@@ -174,11 +211,18 @@ class GmailIntegrationService(private val context: Context) {
                 queryBuilder.add("after:$cutoffSeconds")
                 
                 val query = queryBuilder.joinToString(" ")
-                Log.d(TAG, "=== GMAIL API CALL ===")
-                Log.d(TAG, "Query: '$query'")
-                Log.d(TAG, "Limit: $limit")
-                Log.d(TAG, "Condition: isUnreadOnly=${condition.isUnreadOnly}, fromFilter=${condition.fromFilter}, maxAgeHours=${condition.maxAgeHours}")
-                Log.d(TAG, "Cutoff time: $cutoffTime (${java.util.Date(cutoffTime)})")
+                Log.i(TAG, "📧 === GMAIL API CALL ===")
+                Log.i(TAG, "🔍 Final Query: '$query'")
+                Log.d(TAG, "📊 Limit: $limit")
+                Log.i(TAG, "⚙️ Conditions Applied:")
+                Log.d(TAG, "  📖 Unread Only: ${condition.isUnreadOnly}")
+                Log.d(TAG, "  👤 From Filter: '${condition.fromFilter ?: "None"}'")
+                Log.d(TAG, "  📝 Subject Filter: '${condition.subjectFilter ?: "None"}'")
+                Log.d(TAG, "  💬 Body Filter: '${condition.bodyFilter ?: "None"}'")
+                Log.d(TAG, "  🏷️ Label Filter: '${condition.labelFilter ?: "None"}'")
+                Log.d(TAG, "  ⏰ Max Age Hours: ${condition.maxAgeHours}")
+                Log.d(TAG, "  📅 Cutoff Time: $cutoffTime (${java.util.Date(cutoffTime)})")
+                Log.d(TAG, "🔧 Query Components: ${queryBuilder.joinToString(" | ")}")
                 
                 // Get message list
                 val request = service.users().messages().list("me")

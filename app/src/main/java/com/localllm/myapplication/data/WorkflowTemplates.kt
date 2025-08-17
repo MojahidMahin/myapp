@@ -335,6 +335,93 @@ object WorkflowTemplates {
     }
     
     /**
+     * Template: Email from specific sender trigger
+     */
+    fun createEmailFromSenderTemplate(creatorUserId: String, senderEmail: String, targetUserId: String): MultiUserWorkflow {
+        return MultiUserWorkflow(
+            id = UUID.randomUUID().toString(),
+            name = "Email From: $senderEmail",
+            description = "Trigger when receiving emails from $senderEmail",
+            createdBy = creatorUserId,
+            workflowType = WorkflowType.PERSONAL,
+            triggers = listOf(
+                MultiUserTrigger.UserGmailEmailReceived(
+                    userId = creatorUserId,
+                    fromFilter = senderEmail,
+                    subjectFilter = null,
+                    bodyFilter = null
+                )
+            ),
+            actions = listOf(
+                MultiUserAction.SendToUserTelegram(
+                    targetUserId = targetUserId,
+                    text = "📧 New email from $senderEmail\n\nSubject: {{email_subject}}\nFrom: {{email_from}}\n\nContent:\n{{email_body}}"
+                )
+            )
+        )
+    }
+    
+    /**
+     * Template: Email with subject keyword trigger
+     */
+    fun createEmailSubjectKeywordTemplate(creatorUserId: String, keyword: String, targetUserId: String): MultiUserWorkflow {
+        return MultiUserWorkflow(
+            id = UUID.randomUUID().toString(),
+            name = "Email Subject: $keyword",
+            description = "Trigger when receiving emails with '$keyword' in subject",
+            createdBy = creatorUserId,
+            workflowType = WorkflowType.PERSONAL,
+            triggers = listOf(
+                MultiUserTrigger.UserGmailEmailReceived(
+                    userId = creatorUserId,
+                    fromFilter = null,
+                    subjectFilter = keyword,
+                    bodyFilter = null
+                )
+            ),
+            actions = listOf(
+                MultiUserAction.SendToUserTelegram(
+                    targetUserId = targetUserId,
+                    text = "🔔 Email Alert: '$keyword'\n\nFrom: {{email_from}}\nSubject: {{email_subject}}\n\nContent:\n{{email_body}}"
+                )
+            )
+        )
+    }
+    
+    /**
+     * Template: Combined email filter (sender + subject)
+     */
+    fun createAdvancedEmailFilterTemplate(creatorUserId: String, senderFilter: String?, subjectFilter: String?, targetUserId: String): MultiUserWorkflow {
+        val name = buildString {
+            append("Email Filter:")
+            if (!senderFilter.isNullOrBlank()) append(" From($senderFilter)")
+            if (!subjectFilter.isNullOrBlank()) append(" Subject($subjectFilter)")
+        }
+        
+        return MultiUserWorkflow(
+            id = UUID.randomUUID().toString(),
+            name = name,
+            description = "Advanced email filter with multiple conditions",
+            createdBy = creatorUserId,
+            workflowType = WorkflowType.PERSONAL,
+            triggers = listOf(
+                MultiUserTrigger.UserGmailEmailReceived(
+                    userId = creatorUserId,
+                    fromFilter = senderFilter?.takeIf { it.isNotBlank() },
+                    subjectFilter = subjectFilter?.takeIf { it.isNotBlank() },
+                    bodyFilter = null
+                )
+            ),
+            actions = listOf(
+                MultiUserAction.SendToUserTelegram(
+                    targetUserId = targetUserId,
+                    text = "📬 Filtered Email Alert\n\nFrom: {{email_from}}\nSubject: {{email_subject}}\nReceived: {{trigger_timestamp}}\n\n📝 Content:\n{{email_body}}"
+                )
+            )
+        )
+    }
+    
+    /**
      * Template: Smart Telegram message relay with keywords
      */
     fun createSmartTelegramRelayTemplate(creatorUserId: String, targetUserId: String, keywords: List<String> = listOf("urgent", "important", "help")): MultiUserWorkflow {
@@ -481,6 +568,39 @@ object WorkflowTemplates {
                 optionalUsers = 0,
                 estimatedSetupTime = "3 minutes",
                 tags = listOf("telegram", "keywords", "ai", "smart-filtering", "relay")
+            ),
+            WorkflowTemplate(
+                id = "email-from-sender",
+                name = "Email From Specific Sender",
+                description = "Trigger workflow when receiving emails from a specific sender",
+                category = "Email Filtering",
+                platforms = listOf(Platform.GMAIL, Platform.TELEGRAM),
+                requiredUsers = 1,
+                optionalUsers = 1,
+                estimatedSetupTime = "2 minutes",
+                tags = listOf("email", "gmail", "sender", "filtering", "notifications")
+            ),
+            WorkflowTemplate(
+                id = "email-subject-keyword",
+                name = "Email Subject Keyword",
+                description = "Trigger workflow when emails contain specific keywords in subject",
+                category = "Email Filtering",
+                platforms = listOf(Platform.GMAIL, Platform.TELEGRAM),
+                requiredUsers = 1,
+                optionalUsers = 1,
+                estimatedSetupTime = "2 minutes",
+                tags = listOf("email", "gmail", "subject", "keywords", "filtering")
+            ),
+            WorkflowTemplate(
+                id = "advanced-email-filter",
+                name = "Advanced Email Filter",
+                description = "Combine sender and subject filters for precise email matching",
+                category = "Email Filtering",
+                platforms = listOf(Platform.GMAIL, Platform.TELEGRAM),
+                requiredUsers = 1,
+                optionalUsers = 1,
+                estimatedSetupTime = "3 minutes",
+                tags = listOf("email", "gmail", "advanced", "filtering", "combined")
             )
         )
     }

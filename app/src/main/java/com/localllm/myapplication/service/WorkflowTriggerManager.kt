@@ -399,10 +399,22 @@ class WorkflowTriggerManager(
         trigger: MultiUserTrigger.UserGmailEmailReceived
     ): TriggerExecutionResult {
         return try {
-            Log.d(TAG, "=== GMAIL EMAIL RECEIVED TRIGGER CHECK START ===")
-            Log.d(TAG, "Workflow: ${workflow.name} (ID: ${workflow.id})")
-            Log.d(TAG, "User: ${trigger.userId}")
-            Log.d(TAG, "Filters: fromFilter=${trigger.fromFilter}, subjectFilter=${trigger.subjectFilter}, bodyFilter=${trigger.bodyFilter}")
+            Log.i(TAG, "📧 === GMAIL EMAIL RECEIVED TRIGGER CHECK START ===")
+            Log.i(TAG, "📋 Workflow: ${workflow.name} (ID: ${workflow.id})")
+            Log.i(TAG, "👤 User: ${trigger.userId}")
+            Log.i(TAG, "🔍 Email Filters:")
+            Log.i(TAG, "  👤 From Filter: '${trigger.fromFilter ?: "None"}'")
+            Log.i(TAG, "  📝 Subject Filter: '${trigger.subjectFilter ?: "None"}'")
+            Log.i(TAG, "  💬 Body Filter: '${trigger.bodyFilter ?: "None"}'")
+            
+            // Validate filters
+            val hasFilters = !trigger.fromFilter.isNullOrBlank() || 
+                           !trigger.subjectFilter.isNullOrBlank() || 
+                           !trigger.bodyFilter.isNullOrBlank()
+            
+            if (!hasFilters) {
+                Log.w(TAG, "⚠️ No filters specified - this will match ALL emails!")
+            }
             
             // Check rate limiting
             val workflowKey = "${workflow.id}_${trigger.userId}"
@@ -438,6 +450,7 @@ class WorkflowTriggerManager(
             Log.d(TAG, "Gmail service available, checking for new emails...")
             
             // Create email condition based on filters
+            Log.d(TAG, "🔧 Creating email condition...")
             val condition = GmailIntegrationService.EmailCondition(
                 isUnreadOnly = true,
                 fromFilter = trigger.fromFilter?.takeIf { it.isNotBlank() },
@@ -447,7 +460,13 @@ class WorkflowTriggerManager(
                 newerThan = lastCheck // Only get emails newer than last check
             )
             
-            Log.d(TAG, "Email condition created: fromFilter=${condition.fromFilter}, subjectFilter=${condition.subjectFilter}, bodyFilter=${condition.bodyFilter}")
+            Log.i(TAG, "✅ Email condition created:")
+            Log.d(TAG, "  📖 Unread Only: ${condition.isUnreadOnly}")
+            Log.d(TAG, "  👤 From Filter: '${condition.fromFilter ?: "None"}'")
+            Log.d(TAG, "  📝 Subject Filter: '${condition.subjectFilter ?: "None"}'")
+            Log.d(TAG, "  💬 Body Filter: '${condition.bodyFilter ?: "None"}'")
+            Log.d(TAG, "  ⏰ Max Age: ${condition.maxAgeHours} hours")
+            Log.d(TAG, "  📅 Newer Than: ${if (condition.newerThan != null) java.util.Date(condition.newerThan!!) else "None"}")
             
             val emailsResult = gmailService.checkForNewEmails(condition, 5) // Limit to 5 emails
             emailsResult.fold(
