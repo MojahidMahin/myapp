@@ -432,17 +432,27 @@ class GmailIntegrationService(private val context: Context) {
     private fun createRawMessage(to: String, subject: String, body: String, contentType: String): String {
         val account = currentAccount ?: throw Exception("No authenticated account")
         
-        val message = """
-            From: ${account.email}
-            To: $to
-            Subject: $subject
-            Content-Type: $contentType; charset=UTF-8
-            
-            $body
-        """.trimIndent()
+        // Ensure proper email format for recipient
+        val toFormatted = if (to.contains("<") && to.contains(">")) {
+            to // Already formatted like "Name <email@domain.com>"
+        } else {
+            to.trim() // Just the email address
+        }
+        
+        Log.d(TAG, "Creating raw message - To: '$toFormatted', From: '${account.email}'")
+        
+        val message = """From: ${account.email}
+To: $toFormatted
+Subject: $subject
+Content-Type: $contentType; charset=UTF-8
+MIME-Version: 1.0
+
+$body""".replace("\n", "\r\n")
+        
+        Log.d(TAG, "Raw message created, length: ${message.length} chars")
         
         return android.util.Base64.encodeToString(
-            message.toByteArray(),
+            message.toByteArray(Charsets.UTF_8),
             android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP
         )
     }
