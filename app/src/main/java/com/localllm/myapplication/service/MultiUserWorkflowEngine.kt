@@ -224,6 +224,8 @@ class MultiUserWorkflowEngine(
                 is MultiUserAction.AIExtractKeywords -> aiProcessor.processExtractKeywords(action, context)
                 is MultiUserAction.AISentimentAnalysis -> aiProcessor.processSentimentAnalysis(action, context)
                 is MultiUserAction.AISmartReply -> aiProcessor.processSmartReply(action, context)
+                is MultiUserAction.AISmartSummarizeAndForward -> executeSmartSummarizeAndForward(action, context)
+                is MultiUserAction.AIAutoEmailSummarizer -> executeAutoEmailSummarizer(action, context)
                 
                 // Control Actions
                 is MultiUserAction.RequireApproval -> executeRequireApproval(action, context)
@@ -574,6 +576,364 @@ class MultiUserWorkflowEngine(
         
         if (expired.isNotEmpty()) {
             Log.d(TAG, "Cleaned up ${expired.size} expired approvals")
+        }
+    }
+    
+    /**
+     * Execute smart summarize and forward action
+     * This is the core Zapier-like functionality
+     */
+    private suspend fun executeSmartSummarizeAndForward(
+        action: MultiUserAction.AISmartSummarizeAndForward,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.d(TAG, "Executing Smart Summarize and Forward action")
+            
+            // Initialize AI services
+            val modelManager = com.localllm.myapplication.di.AppContainer.provideModelManager(this.context)
+            val summarizationService = com.localllm.myapplication.service.ai.LocalLLMSummarizationService(modelManager, this.context)
+            val keywordService = com.localllm.myapplication.service.ai.WorkflowKeywordService()
+            val smartForwardingService = com.localllm.myapplication.service.ai.AISmartForwardingService(
+                summarizationService, keywordService, this.context
+            )
+            
+            // Get trigger content
+            val triggerContent = replaceVariables(action.triggerContent, context)
+            Log.d(TAG, "Processing content: ${triggerContent.take(100)}...")
+            
+            // Process and forward content using the smart service
+            val forwardingResult = smartForwardingService.processAndForward(
+                content = triggerContent,
+                rules = action.keywordRules,
+                defaultDestination = action.defaultForwardTo,
+                context = context.variables.toMap()
+            )
+            
+            forwardingResult.fold(
+                onSuccess = { result ->
+                    // Store results in context variables
+                    context.variables[action.summaryOutputVariable] = result.summary
+                    context.variables[action.keywordsOutputVariable] = result.extractedKeywords.joinToString(", ")
+                    context.variables[action.forwardingDecisionVariable] = result.matchedRule?.description ?: "default"
+                    
+                    Log.d(TAG, "Smart forwarding completed successfully")
+                    Log.d(TAG, "Summary: ${result.summary.take(100)}...")
+                    Log.d(TAG, "Keywords: ${result.extractedKeywords.take(5)}")
+                    Log.d(TAG, "Matched rule: ${result.matchedRule?.description ?: "none"}")
+                    
+                    // Execute the generated forwarding actions
+                    if (result.forwardingActions.isNotEmpty()) {
+                        Log.d(TAG, "Executing ${result.forwardingActions.size} forwarding actions")
+                        for ((index, forwardingAction) in result.forwardingActions.withIndex()) {
+                            Log.d(TAG, "Executing forwarding action ${index + 1}: ${forwardingAction::class.simpleName}")
+                            val actionResult = executeAction(forwardingAction, context)
+                            actionResult.fold(
+                                onSuccess = { message ->
+                                    Log.d(TAG, "Forwarding action executed successfully: $message")
+                                },
+                                onFailure = { error ->
+                                    Log.w(TAG, "Forwarding action failed: ${error.message}")
+                                    // Continue with other actions even if one fails
+                                }
+                            )
+                        }
+                    }
+                    
+                    val successMessage = """Smart summarization and forwarding completed successfully.
+                        |Summary: ${result.summary}
+                        |Keywords: ${result.extractedKeywords.joinToString(", ")}
+                        |Matched rule: ${result.matchedRule?.description ?: "default destination"}
+                        |Forwarding actions executed: ${result.forwardingActions.size}
+                    """.trimMargin()
+                    
+                    Result.success(successMessage)
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Smart forwarding failed: ${error.message}")
+                    Result.failure(Exception("Smart summarize and forward failed: ${error.message}"))
+                }
+            )
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in executeSmartSummarizeAndForward", e)
+            Result.failure(Exception("Smart action execution failed: ${e.message}"))
+        }
+    }
+    
+    /**
+     * Execute auto email summarizer action
+     * Automatically summarizes triggered email and forwards to specified addresses
+     */
+    private suspend fun executeAutoEmailSummarizer(
+        action: MultiUserAction.AIAutoEmailSummarizer,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.d(TAG, "Executing Auto Email Summarizer action")
+            
+            // Get email data from trigger context
+            val emailSubject = context.variables["email_subject"] ?: ""
+            val emailBody = context.variables["email_body"] ?: ""
+            val emailFrom = context.variables["email_from"] ?: ""
+            
+            if (emailBody.isEmpty()) {
+                Log.w(TAG, "No email content found in trigger context")
+                return Result.failure(Exception("No email content available for summarization"))
+            }
+            
+            // Initialize summarization service
+            val modelManager = com.localllm.myapplication.di.AppContainer.provideModelManager(this.context)
+            val summarizationService = com.localllm.myapplication.service.ai.LocalLLMSummarizationService(modelManager, this.context)
+            
+            // Create email content for summarization
+            val emailContent = "Subject: $emailSubject\nFrom: $emailFrom\n\n$emailBody"
+            
+            // Summarize the email
+            val summaryResult = summarizationService.summarizeText(
+                text = emailContent,
+                maxLength = action.maxSummaryLength,
+                style = when (action.summaryStyle) {
+                    "detailed" -> com.localllm.myapplication.service.ai.SummarizationStyle.DETAILED
+                    "structured" -> com.localllm.myapplication.service.ai.SummarizationStyle.STRUCTURED
+                    else -> com.localllm.myapplication.service.ai.SummarizationStyle.CONCISE
+                }
+            )
+            
+            if (summaryResult.isFailure) {
+                Log.w(TAG, "AI summarization failed, workflow will continue with fallback: ${summaryResult.exceptionOrNull()?.message}")
+                // Don't fail the entire workflow, use fallback summary
+                val fallbackSummary = createFallbackEmailSummary(emailSubject, emailBody, emailFrom)
+                Log.i(TAG, "Using fallback email summary")
+                context.variables[action.summaryOutputVariable] = fallbackSummary
+                
+                // Continue with fallback summary instead of failing
+                val summarySubject = if (action.includeOriginalSubject) {
+                    "${action.customSubjectPrefix} $emailSubject"
+                } else {
+                    "${action.customSubjectPrefix} Email Summary"
+                }
+                
+                val originalInfo = buildString {
+                    if (action.includeOriginalSender) {
+                        append("Original sender: $emailFrom\n")
+                    }
+                    if (action.includeOriginalSubject) {
+                        append("Original subject: $emailSubject\n")
+                    }
+                }
+                
+                val emailBodyContent = action.emailTemplate
+                    .replace("{{summary_subject}}", summarySubject)
+                    .replace("{{ai_summary}}", fallbackSummary)
+                    .replace("{{original_info}}", originalInfo)
+                    .replace("{{email_from}}", emailFrom)
+                    .replace("{{email_subject}}", emailSubject)
+                    .replace("{{email_body}}", emailBody)
+                
+                // Continue with email sending using fallback summary
+                return sendSummaryEmails(action, emailBodyContent, summarySubject, fallbackSummary, context)
+            }
+            
+            val summary = summaryResult.getOrThrow()
+            Log.d(TAG, "Email summarized successfully: ${summary.take(100)}...")
+            
+            // Store summary in context
+            context.variables[action.summaryOutputVariable] = summary
+            
+            // Build email content for forwarding
+            val summarySubject = if (action.includeOriginalSubject) {
+                "${action.customSubjectPrefix} $emailSubject"
+            } else {
+                "${action.customSubjectPrefix} Email Summary"
+            }
+            
+            val originalInfo = buildString {
+                if (action.includeOriginalSender) {
+                    append("Original sender: $emailFrom\n")
+                }
+                if (action.includeOriginalSubject) {
+                    append("Original subject: $emailSubject\n")
+                }
+            }
+            
+            // Replace template variables in email body
+            val emailBodyContent = action.emailTemplate
+                .replace("{{summary_subject}}", summarySubject)
+                .replace("{{ai_summary}}", summary)
+                .replace("{{original_info}}", originalInfo)
+                .replace("{{email_from}}", emailFrom)
+                .replace("{{email_subject}}", emailSubject)
+                .replace("{{email_body}}", emailBody)
+            
+            // Send summary emails using helper method
+            return sendSummaryEmails(action, emailBodyContent, summarySubject, summary, context)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in executeAutoEmailSummarizer", e)
+            Result.failure(Exception("Auto email summarizer failed: ${e.message}"))
+        }
+    }
+    
+    /**
+     * Create fallback email summary when AI is not available
+     */
+    private fun createFallbackEmailSummary(subject: String, body: String, sender: String): String {
+        Log.d(TAG, "Creating fallback email summary")
+        
+        return buildString {
+            append("📧 Email Summary (Generated without AI)\n\n")
+            
+            // Add sender info
+            if (sender.isNotBlank()) {
+                append("From: $sender\n")
+            }
+            
+            // Add subject
+            if (subject.isNotBlank()) {
+                append("Subject: $subject\n\n")
+            }
+            
+            // Create basic summary from body
+            if (body.isNotBlank()) {
+                val cleanBody = body.trim()
+                val sentences = cleanBody.split(Regex("[.!?]+"))
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && it.length > 10 }
+                
+                when {
+                    sentences.isEmpty() -> {
+                        // Fallback to first 100 characters
+                        val preview = cleanBody.take(100)
+                        append("Content: $preview")
+                        if (cleanBody.length > 100) append("...")
+                    }
+                    sentences.size == 1 -> {
+                        append("Content: ${sentences[0]}")
+                    }
+                    else -> {
+                        // Take first 2 most important sentences
+                        val importantSentences = sentences.take(2)
+                        append("Key Points:\n")
+                        importantSentences.forEach { sentence ->
+                            append("• $sentence\n")
+                        }
+                    }
+                }
+            } else {
+                append("Content: No email content available")
+            }
+            
+            append("\n\n⚠️ Note: This summary was generated using basic text processing because AI model is not currently available.")
+        }
+    }
+    
+    /**
+     * Send summary emails to all configured addresses
+     */
+    private suspend fun sendSummaryEmails(
+        action: MultiUserAction.AIAutoEmailSummarizer,
+        emailBodyContent: String,
+        summarySubject: String,
+        summary: String,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        val sentEmails = mutableListOf<String>()
+        val failedEmails = mutableListOf<String>()
+        
+        for (emailAddress in action.forwardToEmails) {
+            if (emailAddress.isBlank()) continue
+            
+            try {
+                Log.d(TAG, "Forwarding email summary to: $emailAddress")
+                
+                // Use the trigger user's Gmail service to send the summary
+                val gmailService = userManager.getGmailService(context.triggerUserId)
+                if (gmailService == null) {
+                    Log.w(TAG, "Gmail service not available for user: ${context.triggerUserId}")
+                    failedEmails.add("$emailAddress (no Gmail service)")
+                    continue
+                }
+                
+                val sendResult = gmailService.sendEmail(
+                    to = emailAddress,
+                    subject = summarySubject,
+                    body = emailBodyContent,
+                    isHtml = false
+                )
+                
+                sendResult.fold(
+                    onSuccess = { messageId ->
+                        Log.d(TAG, "Summary email sent successfully to $emailAddress with ID: $messageId")
+                        sentEmails.add(emailAddress)
+                    },
+                    onFailure = { error ->
+                        Log.e(TAG, "Failed to send summary email to $emailAddress: ${error.message}")
+                        failedEmails.add("$emailAddress (${error.message})")
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending summary email to $emailAddress", e)
+                failedEmails.add("$emailAddress (${e.message})")
+            }
+        }
+        
+        // Generate result message
+        val resultMessage = buildString {
+            if (summary.contains("Generated without AI")) {
+                append("Auto Email Summarizer completed with fallback processing.\n")
+            } else {
+                append("Auto Email Summarizer completed successfully.\n")
+            }
+            append("Summary generated: ${summary.take(50)}...\n")
+            append("Emails sent to: ${sentEmails.size} addresses")
+            if (sentEmails.isNotEmpty()) {
+                append(" (${sentEmails.joinToString(", ")})")
+            }
+            if (failedEmails.isNotEmpty()) {
+                append("\nFailed to send to: ${failedEmails.joinToString(", ")}")
+            }
+        }
+        
+        Log.i(TAG, "Auto Email Summarizer completed: ${sentEmails.size} sent, ${failedEmails.size} failed")
+        return Result.success(resultMessage)
+    }
+    
+    /**
+     * Replace template variables in strings with values from context
+     */
+    private fun replaceVariables(template: String, context: WorkflowExecutionContext): String {
+        var result = template
+        
+        // Replace context variables
+        for ((key, value) in context.variables) {
+            result = result.replace("{{$key}}", value)
+        }
+        
+        // Replace standard trigger variables
+        result = result.replace("{{trigger_content}}", extractTriggerContent(context.triggerData))
+        result = result.replace("{{trigger_user_id}}", context.triggerUserId)
+        result = result.replace("{{workflow_id}}", context.workflowId)
+        result = result.replace("{{execution_id}}", context.executionId)
+        
+        return result
+    }
+    
+    /**
+     * Extract content from trigger data
+     */
+    private fun extractTriggerContent(triggerData: Any): String {
+        return when (triggerData) {
+            is Map<*, *> -> {
+                // Try common content fields
+                triggerData["email_body"]?.toString() 
+                    ?: triggerData["telegram_message"]?.toString()
+                    ?: triggerData["content"]?.toString()
+                    ?: triggerData["text"]?.toString()
+                    ?: triggerData.toString()
+            }
+            is String -> triggerData
+            else -> triggerData.toString()
         }
     }
 }

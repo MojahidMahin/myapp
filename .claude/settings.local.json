@@ -20,7 +20,12 @@
       "Bash(cd:*)",
       "Bash(cd:*)",
       "Bash(cd:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(find:*)",
+      "Bash(rm:*)",
+      "Bash(cd:*)",
+      "Bash(cd:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits"

@@ -546,6 +546,8 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.AIExtractKeywords,
                 is MultiUserAction.AISentimentAnalysis,
                 is MultiUserAction.AISmartReply,
+                is MultiUserAction.AISmartSummarizeAndForward,
+                is MultiUserAction.AIAutoEmailSummarizer,
                 is MultiUserAction.RequireApproval,
                 is MultiUserAction.LogAction,
                 is MultiUserAction.NotificationAction -> {
@@ -640,6 +642,16 @@ class WorkflowValidator(private val context: Context) {
                     action.context?.let { extractVariables(it, usedVariables) }
                     definedVariables.add(action.outputVariable)
                 }
+                is MultiUserAction.AISmartSummarizeAndForward -> {
+                    extractVariables(action.triggerContent, usedVariables)
+                    definedVariables.add(action.summaryOutputVariable)
+                    definedVariables.add(action.keywordsOutputVariable)
+                    definedVariables.add(action.forwardingDecisionVariable)
+                }
+                is MultiUserAction.AIAutoEmailSummarizer -> {
+                    // Uses email data from trigger context, no variables to extract from action
+                    definedVariables.add(action.summaryOutputVariable)
+                }
                 // Other action types that don't have text to extract
                 is MultiUserAction.ReplyToUserGmail,
                 is MultiUserAction.ForwardUserGmail,
@@ -713,6 +725,14 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.AIExtractKeywords -> aiOutputVariables.add(action.outputVariable)
                 is MultiUserAction.AISentimentAnalysis -> aiOutputVariables.add(action.outputVariable)
                 is MultiUserAction.AISmartReply -> aiOutputVariables.add(action.outputVariable)
+                is MultiUserAction.AISmartSummarizeAndForward -> {
+                    aiOutputVariables.add(action.summaryOutputVariable)
+                    aiOutputVariables.add(action.keywordsOutputVariable)
+                    aiOutputVariables.add(action.forwardingDecisionVariable)
+                }
+                is MultiUserAction.AIAutoEmailSummarizer -> {
+                    aiOutputVariables.add(action.summaryOutputVariable)
+                }
                 is MultiUserAction.ConditionalAction -> conditionalActions.add(action)
                 // Non-AI actions don't produce output variables
                 is MultiUserAction.SendToUserGmail,

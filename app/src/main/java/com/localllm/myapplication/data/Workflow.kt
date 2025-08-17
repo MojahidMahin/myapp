@@ -279,6 +279,44 @@ sealed class MultiUserAction {
         val outputVariable: String = "ai_reply"
     ) : MultiUserAction()
     
+    /**
+     * Smart action that summarizes trigger content and forwards based on keywords
+     * This implements the Zapier-like functionality requested
+     */
+    data class AISmartSummarizeAndForward(
+        val triggerContent: String = "{{trigger_content}}", // Content from trigger (email body, telegram message, etc.)
+        val summarizationStyle: String = "concise", // "concise", "detailed", "structured", "keywords_focused"
+        val maxSummaryLength: Int = 150,
+        val keywordRules: List<KeywordForwardingRule> = emptyList(), // Rules for keyword-based forwarding
+        val defaultForwardTo: ForwardingDestination? = null, // Default destination if no keywords match
+        val includeOriginalContent: Boolean = false, // Whether to include original content with summary
+        val summaryOutputVariable: String = "ai_summary",
+        val keywordsOutputVariable: String = "extracted_keywords",
+        val forwardingDecisionVariable: String = "forwarding_decision"
+    ) : MultiUserAction()
+    
+    /**
+     * Auto Email Summarizer - Simpler action for automatically summarizing triggered emails
+     * and forwarding the summary to specified email addresses
+     */
+    data class AIAutoEmailSummarizer(
+        val forwardToEmails: List<String>, // List of email addresses to forward summaries to
+        val summaryStyle: String = "concise", // "concise", "detailed", "structured"
+        val maxSummaryLength: Int = 200,
+        val includeOriginalSubject: Boolean = true,
+        val includeOriginalSender: Boolean = true,
+        val customSubjectPrefix: String = "[Summary]",
+        val emailTemplate: String = """
+            {{summary_subject}}
+            
+            Summary:
+            {{ai_summary}}
+            
+            {{original_info}}
+        """.trimIndent(),
+        val summaryOutputVariable: String = "email_summary"
+    ) : MultiUserAction()
+    
     // Approval and workflow control
     data class RequireApproval(
         val approverUserId: String,
@@ -341,3 +379,50 @@ data class WorkflowExecutionResult(
     val duration: Long = 0L,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+/**
+ * Supporting data classes for AISmartSummarizeAndForward action
+ */
+
+/**
+ * Rule for keyword-based forwarding decisions
+ */
+data class KeywordForwardingRule(
+    val keywords: List<String>, // Keywords to match
+    val matchingStrategy: String = "fuzzy", // "exact", "fuzzy", "semantic", "pattern"
+    val minimumMatches: Int = 1, // Minimum number of keywords that must match
+    val destination: ForwardingDestination, // Where to forward if rule matches
+    val priority: Int = 0, // Higher priority rules are checked first
+    val description: String = "" // Human-readable description of the rule
+)
+
+/**
+ * Destination for forwarding content
+ */
+sealed class ForwardingDestination {
+    data class EmailDestination(
+        val email: String,
+        val subject: String = "Forwarded: {{original_subject}}",
+        val bodyTemplate: String = "{{ai_summary}}\n\n---\nOriginal content:\n{{original_content}}"
+    ) : ForwardingDestination()
+    
+    data class TelegramDestination(
+        val chatId: Long,
+        val messageTemplate: String = "📧 Summary: {{ai_summary}}"
+    ) : ForwardingDestination()
+    
+    data class UserGmailDestination(
+        val targetUserId: String,
+        val subject: String = "Forwarded: {{original_subject}}",
+        val bodyTemplate: String = "{{ai_summary}}\n\n---\nOriginal content:\n{{original_content}}"
+    ) : ForwardingDestination()
+    
+    data class UserTelegramDestination(
+        val targetUserId: String,
+        val messageTemplate: String = "📧 Summary: {{ai_summary}}"
+    ) : ForwardingDestination()
+    
+    data class MultipleDestinations(
+        val destinations: List<ForwardingDestination>
+    ) : ForwardingDestination()
+}

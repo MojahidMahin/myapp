@@ -788,6 +788,8 @@ enum class ActionType {
     AI_SUMMARIZE,
     AI_TRANSLATE,
     AI_GENERATE_REPLY,
+    AI_SMART_SUMMARIZE_AND_FORWARD, // New Zapier-like smart action
+    AI_AUTO_EMAIL_SUMMARIZER, // Simple auto email summarizer
     DELAY,
     CONDITIONAL
 }
@@ -993,10 +995,115 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
             tone = config.config["tone"] ?: "professional",
             outputVariable = config.config["outputVar"] ?: "ai_reply"
         )
+        ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> {
+            // Parse keyword rules from config
+            val keywordRules = parseKeywordRules(config.config["keywordRules"] ?: "")
+            val defaultDestination = parseForwardingDestination(
+                config.config["defaultForwardTo"] ?: "",
+                config.config["defaultForwardType"] ?: "email"
+            )
+            
+            MultiUserAction.AISmartSummarizeAndForward(
+                triggerContent = config.config["triggerContent"] ?: "{{trigger_content}}",
+                summarizationStyle = config.config["summarizationStyle"] ?: "concise",
+                maxSummaryLength = config.config["maxSummaryLength"]?.toIntOrNull() ?: 150,
+                keywordRules = keywordRules,
+                defaultForwardTo = defaultDestination,
+                includeOriginalContent = config.config["includeOriginalContent"]?.toBooleanStrictOrNull() ?: false,
+                summaryOutputVariable = config.config["summaryOutputVar"] ?: "ai_summary",
+                keywordsOutputVariable = config.config["keywordsOutputVar"] ?: "extracted_keywords",
+                forwardingDecisionVariable = config.config["forwardingDecisionVar"] ?: "forwarding_decision"
+            )
+        }
+        ActionType.AI_AUTO_EMAIL_SUMMARIZER -> {
+            // Parse email list from config string (comma-separated)
+            val emailList = config.config["forwardToEmails"]?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+            
+            MultiUserAction.AIAutoEmailSummarizer(
+                forwardToEmails = emailList,
+                summaryStyle = config.config["summaryStyle"] ?: "concise",
+                maxSummaryLength = config.config["maxSummaryLength"]?.toIntOrNull() ?: 200,
+                includeOriginalSubject = config.config["includeOriginalSubject"]?.toBooleanStrictOrNull() ?: true,
+                includeOriginalSender = config.config["includeOriginalSender"]?.toBooleanStrictOrNull() ?: true,
+                customSubjectPrefix = config.config["customSubjectPrefix"] ?: "[Summary]",
+                summaryOutputVariable = config.config["summaryOutputVar"] ?: "email_summary"
+            )
+        }
         ActionType.DELAY -> MultiUserAction.DelayAction(
             delayMinutes = config.config["delayMinutes"]?.toIntOrNull() ?: 5
         )
         else -> MultiUserAction.LogAction("Dynamic action executed")
+    }
+}
+
+/**
+ * Parse keyword rules from config string
+ * Format: "urgent,asap->support@company.com|bug,error->tech@company.com"
+ */
+fun parseKeywordRules(rulesString: String): List<KeywordForwardingRule> {
+    if (rulesString.isBlank()) return emptyList()
+    
+    return try {
+        rulesString.split("|").mapNotNull { ruleString ->
+            val parts = ruleString.split("->")
+            if (parts.size == 2) {
+                val keywords = parts[0].split(",").map { it.trim() }
+                val destination = ForwardingDestination.EmailDestination(
+                    email = parts[1].trim(),
+                    subject = "Forwarded: {{original_subject}}",
+                    bodyTemplate = "{{ai_summary}}\n\n---\nOriginal content:\n{{original_content}}"
+                )
+                KeywordForwardingRule(
+                    keywords = keywords,
+                    matchingStrategy = "fuzzy",
+                    minimumMatches = 1,
+                    destination = destination,
+                    priority = 0,
+                    description = "Forward if contains: ${keywords.joinToString(", ")}"
+                )
+            } else null
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("WorkflowBuilder", "Failed to parse keyword rules: $rulesString", e)
+        emptyList()
+    }
+}
+
+/**
+ * Parse forwarding destination from config
+ */
+fun parseForwardingDestination(destination: String, type: String): ForwardingDestination? {
+    if (destination.isBlank()) return null
+    
+    return when (type.lowercase()) {
+        "email" -> ForwardingDestination.EmailDestination(
+            email = destination,
+            subject = "Forwarded: {{original_subject}}",
+            bodyTemplate = "{{ai_summary}}\n\n---\nOriginal content:\n{{original_content}}"
+        )
+        "telegram" -> try {
+            val chatId = destination.toLong()
+            ForwardingDestination.TelegramDestination(
+                chatId = chatId,
+                messageTemplate = "📧 Summary: {{ai_summary}}"
+            )
+        } catch (e: NumberFormatException) {
+            android.util.Log.w("WorkflowBuilder", "Invalid Telegram chat ID: $destination")
+            null
+        }
+        "user_gmail" -> ForwardingDestination.UserGmailDestination(
+            targetUserId = destination,
+            subject = "Forwarded: {{original_subject}}",
+            bodyTemplate = "{{ai_summary}}\n\n---\nOriginal content:\n{{original_content}}"
+        )
+        "user_telegram" -> ForwardingDestination.UserTelegramDestination(
+            targetUserId = destination,
+            messageTemplate = "📧 Summary: {{ai_summary}}"
+        )
+        else -> {
+            android.util.Log.w("WorkflowBuilder", "Unknown forwarding type: $type")
+            null
+        }
     }
 }
 
@@ -1626,6 +1733,36 @@ fun ActionPickerDialog(
                                     )
                                 )
                             }
+                            item {
+                                ActionOptionCard(
+                                    title = "Auto Email Summarizer",
+                                    description = "Automatically summarize triggered emails and forward to specified addresses",
+                                    icon = "📧🤖",
+                                    onClick = {
+                                        val emails = actionConfig["forwardToEmails"] ?: ""
+                                        val displayEmails = if (emails.isNotEmpty()) 
+                                            emails.split(",").take(2).joinToString(", ") + if (emails.split(",").size > 2) "..." else ""
+                                        else "configured addresses"
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.AI_AUTO_EMAIL_SUMMARIZER,
+                                            displayName = "Auto Email Summary → $displayEmails",
+                                            config = actionConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = actionConfig,
+                                    onConfigChange = { key, value ->
+                                        actionConfig = actionConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "forwardToEmails" to "Forward to emails (comma-separated)",
+                                        "summaryStyle" to "Summary style (concise, detailed, structured)",
+                                        "maxSummaryLength" to "Max summary length (words)",
+                                        "customSubjectPrefix" to "Subject prefix (e.g., [Summary])",
+                                        "summaryOutputVar" to "Summary variable name"
+                                    )
+                                )
+                            }
                         }
                         "Utility" -> {
                             item {
@@ -2131,6 +2268,8 @@ fun ActionPreview(
                 ActionType.AI_SUMMARIZE -> "📝"
                 ActionType.AI_TRANSLATE -> "🌐"
                 ActionType.AI_GENERATE_REPLY -> "🤖"
+                ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> "🤖📝"
+                ActionType.AI_AUTO_EMAIL_SUMMARIZER -> "📧🤖"
                 ActionType.DELAY -> "⏱️"
                 ActionType.CONDITIONAL -> "🔀"
             }
@@ -2165,6 +2304,8 @@ fun ActionPreview(
                         ActionType.AI_SUMMARIZE -> "Summarize content with AI"
                         ActionType.AI_TRANSLATE -> "Translate text with AI"
                         ActionType.AI_GENERATE_REPLY -> "Generate smart reply with AI"
+                        ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> "Smart summarize and forward with AI"
+                        ActionType.AI_AUTO_EMAIL_SUMMARIZER -> "Auto-summarize and forward emails"
                         ActionType.DELAY -> "Wait before next action"
                         ActionType.CONDITIONAL -> "Execute conditionally"
                     },
@@ -2703,6 +2844,32 @@ fun validateAction(action: ActionConfig, inputData: Map<String, String>, users: 
                 details = mapOf("targetLanguage" to language, "outputVariable" to outputVar)
             )
         }
+        ActionType.AI_AUTO_EMAIL_SUMMARIZER -> {
+            val emails = action.config["forwardToEmails"]?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+            val summaryStyle = action.config["summaryStyle"] ?: "concise"
+            val maxLength = action.config["maxSummaryLength"]?.toIntOrNull() ?: 200
+            val outputVar = action.config["summaryOutputVar"] ?: "email_summary"
+            
+            if (emails.isEmpty()) {
+                ActionValidationResult(
+                    message = "⚠️ No forward email addresses specified",
+                    status = WorkflowTestStatus.WARNING
+                )
+            } else {
+                val emailsDisplay = emails.take(2).joinToString(", ") + if (emails.size > 2) "..." else ""
+                ActionValidationResult(
+                    message = "✓ Will summarize emails ($summaryStyle, max $maxLength words) and forward to: $emailsDisplay",
+                    status = WorkflowTestStatus.SUCCESS,
+                    output = mapOf(outputVar to "Sample email summary"),
+                    details = mapOf(
+                        "forwardToEmails" to emails.joinToString(", "),
+                        "summaryStyle" to summaryStyle,
+                        "maxSummaryLength" to maxLength,
+                        "outputVariable" to outputVar
+                    )
+                )
+            }
+        }
         ActionType.DELAY -> {
             val minutes = action.config["delayMinutes"]?.toIntOrNull() ?: 5
             ActionValidationResult(
@@ -2861,7 +3028,8 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
         when (action.type) {
             ActionType.SEND_GMAIL, ActionType.REPLY_GMAIL -> platforms.add(WorkflowPlatform.GMAIL)
             ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM -> platforms.add(WorkflowPlatform.TELEGRAM)
-            ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY -> {
+            ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY, 
+            ActionType.AI_SMART_SUMMARIZE_AND_FORWARD, ActionType.AI_AUTO_EMAIL_SUMMARIZER -> {
                 platforms.add(WorkflowPlatform.AI)
             }
             else -> {}
