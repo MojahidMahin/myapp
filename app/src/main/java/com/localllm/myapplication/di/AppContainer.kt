@@ -28,6 +28,8 @@ object AppContainer {
     private var workflowEngine: MultiUserWorkflowEngine? = null
     private var triggerManager: WorkflowTriggerManager? = null
     private var importExportManager: WorkflowImportExportManager? = null
+    private var contactRepository: ContactRepository? = null
+    private var contactAutoSaveService: ContactAutoSaveService? = null
 
     fun provideAuthViewModel(activity: Activity): AuthViewModel {
         val authRepository = FirebaseAuthRepository(activity)
@@ -153,6 +155,20 @@ object AppContainer {
         return triggerManager!!
     }
     
+    fun provideContactRepository(context: Context): ContactRepository {
+        if (contactRepository == null) {
+            contactRepository = ContactRepositoryImpl(context.applicationContext)
+        }
+        return contactRepository!!
+    }
+    
+    fun provideContactAutoSaveService(context: Context): ContactAutoSaveService {
+        if (contactAutoSaveService == null) {
+            contactAutoSaveService = ContactAutoSaveService(context.applicationContext)
+        }
+        return contactAutoSaveService!!
+    }
+    
     fun provideImportExportManager(context: Context): WorkflowImportExportManager {
         if (importExportManager == null) {
             val workflowRepo = provideWorkflowRepository(context)
@@ -186,5 +202,7 @@ object AppContainer {
         executionRepository = null
         aiWorkflowProcessor = null
         workflowEngine = null
+        contactRepository = null
+        contactAutoSaveService = null
     }
 }

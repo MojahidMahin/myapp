@@ -116,3 +116,42 @@ interface ProcessedEmailDao {
     @Query("SELECT COUNT(*) FROM processed_emails WHERE workflowId = :workflowId")
     suspend fun getProcessedEmailCount(workflowId: String): Int
 }
+
+@Dao
+interface ContactDao {
+    @Query("SELECT * FROM contacts ORDER BY name COLLATE NOCASE ASC")
+    suspend fun getAllContacts(): List<ContactEntity>
+    
+    @Query("SELECT * FROM contacts WHERE id = :id")
+    suspend fun getContactById(id: String): ContactEntity?
+    
+    @Query("SELECT * FROM contacts WHERE gmail = :gmail COLLATE NOCASE")
+    suspend fun getContactByGmail(gmail: String): ContactEntity?
+    
+    @Query("SELECT * FROM contacts WHERE telegramId = :telegramId")
+    suspend fun getContactByTelegramId(telegramId: String): ContactEntity?
+    
+    @Query("SELECT * FROM contacts WHERE telegramUsername = :username COLLATE NOCASE")
+    suspend fun getContactByTelegramUsername(username: String): ContactEntity?
+    
+    @Query("SELECT * FROM contacts WHERE name LIKE '%' || :query || '%' COLLATE NOCASE OR gmail LIKE '%' || :query || '%' COLLATE NOCASE OR telegramUsername LIKE '%' || :query || '%' COLLATE NOCASE ORDER BY name COLLATE NOCASE ASC")
+    suspend fun searchContacts(query: String): List<ContactEntity>
+    
+    @Query("SELECT * FROM contacts WHERE isAutoSaved = 1 ORDER BY createdAt DESC")
+    suspend fun getAutoSavedContacts(): List<ContactEntity>
+    
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertContact(contact: ContactEntity)
+    
+    @Update
+    suspend fun updateContact(contact: ContactEntity)
+    
+    @Delete
+    suspend fun deleteContact(contact: ContactEntity)
+    
+    @Query("DELETE FROM contacts WHERE id = :contactId")
+    suspend fun deleteContactById(contactId: String)
+    
+    @Query("SELECT COUNT(*) FROM contacts")
+    suspend fun getContactCount(): Int
+}

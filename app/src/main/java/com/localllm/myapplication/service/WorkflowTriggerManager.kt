@@ -549,6 +549,14 @@ class WorkflowTriggerManager(
         triggerData: Map<String, String>
     ): TriggerExecutionResult {
         return try {
+            // Auto-save contacts from workflow trigger data
+            try {
+                val contactAutoSaveService = com.localllm.myapplication.di.AppContainer.provideContactAutoSaveService(context)
+                contactAutoSaveService.autoSaveFromWorkflowData(triggerData)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to auto-save contacts from workflow data", e)
+            }
+            
             val result = workflowEngine.executeWorkflow(workflow.id, triggerUserId, triggerData)
             
             result.fold(

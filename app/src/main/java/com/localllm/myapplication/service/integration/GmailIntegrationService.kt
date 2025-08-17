@@ -211,6 +211,16 @@ class GmailIntegrationService(private val context: Context) {
                     Log.d(TAG, "  ${email.id}: '${email.subject}' from ${email.from} (read: ${email.isRead})")
                 }
                 
+                // Auto-save contacts from email senders
+                try {
+                    val contactAutoSaveService = com.localllm.myapplication.di.AppContainer.provideContactAutoSaveService(context)
+                    emailMessages.forEach { email ->
+                        contactAutoSaveService.autoSaveFromGmailEmail(email.from)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to auto-save contacts from emails", e)
+                }
+                
                 Result.success(emailMessages)
                 
             } catch (e: UserRecoverableAuthIOException) {

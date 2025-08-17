@@ -452,6 +452,39 @@ class WorkflowValidator(private val context: Context) {
                     }
                 }
                 
+                is MultiUserAction.ForwardGmailToTelegram -> {
+                    // Validate user existence
+                    val user = userManager.getUserById(action.targetUserId).getOrNull()
+                    if (user == null) {
+                        errors.add(
+                            ValidationError(
+                                "INVALID_FORWARD_TARGET",
+                                "Forward Gmail to Telegram action at index $index targets non-existent user: ${action.targetUserId}",
+                                suggestedFix = "Verify the target user ID exists"
+                            )
+                        )
+                    } else if (!user.telegramConnected) {
+                        warnings.add(
+                            ValidationWarning(
+                                "TELEGRAM_NOT_CONNECTED_FORWARD",
+                                "Target user for Forward Gmail to Telegram action at index $index doesn't have Telegram connected",
+                                "Ensure the target user has connected their Telegram account"
+                            )
+                        )
+                    }
+                    
+                    // Warn if no content will be included
+                    if (!action.includeSubject && !action.includeFrom && !action.includeBody) {
+                        warnings.add(
+                            ValidationWarning(
+                                "NO_CONTENT_INCLUDED",
+                                "Forward Gmail to Telegram action at index $index has all content options disabled",
+                                "Enable at least one of: includeSubject, includeFrom, or includeBody"
+                            )
+                        )
+                    }
+                }
+                
                 is MultiUserAction.AIAnalyzeText -> {
                     if (action.inputText.isBlank()) {
                         errors.add(
@@ -608,6 +641,9 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.SendToUserTelegram -> {
                     extractVariables(action.text, usedVariables)
                 }
+                is MultiUserAction.ForwardGmailToTelegram -> {
+                    action.messageTemplate?.let { extractVariables(it, usedVariables) }
+                }
                 is MultiUserAction.AIAnalyzeText -> {
                     extractVariables(action.inputText, usedVariables)
                     extractVariables(action.analysisPrompt, usedVariables)
@@ -739,6 +775,7 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.ReplyToUserGmail,
                 is MultiUserAction.ForwardUserGmail,
                 is MultiUserAction.SendToUserTelegram,
+                is MultiUserAction.ForwardGmailToTelegram,
                 is MultiUserAction.ReplyToUserTelegram,
                 is MultiUserAction.ForwardUserTelegram,
                 is MultiUserAction.SendToMultipleUsers,

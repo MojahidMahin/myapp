@@ -346,6 +346,19 @@ fun SignInScreen(viewModel: AuthViewModel) {
                     ) {
                         Text("🎨 AI Gallery (Full Features)")
                     }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Button(
+                        onClick = {
+                            Log.d("UI", "Contacts button clicked - starting ContactActivity")
+                            val intent = Intent(context, com.localllm.myapplication.ui.ContactActivity::class.java)
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("👤 Contacts")
+                    }
                 }
             }
             

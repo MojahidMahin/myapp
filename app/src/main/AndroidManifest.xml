@@ -184,6 +184,12 @@
             android:label="Select Location"
             android:theme="@style/Theme.MyApplication" />
 
+        <activity
+            android:name=".ui.ContactActivity"
+            android:exported="false"
+            android:label="Contacts"
+            android:theme="@style/Theme.MyApplication" />
+
         <!-- Geofence Broadcast Receiver -->
         <receiver
             android:name=".service.GeofenceBroadcastReceiver"

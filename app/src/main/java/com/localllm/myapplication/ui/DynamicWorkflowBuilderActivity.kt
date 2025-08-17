@@ -173,6 +173,18 @@ fun DynamicWorkflowBuilderScreen(
                                             "text" to (action.text ?: "")
                                         )
                                     )
+                                    is MultiUserAction.ForwardGmailToTelegram -> ActionConfig(
+                                        type = ActionType.FORWARD_GMAIL_TO_TELEGRAM,
+                                        displayName = "Forward Gmail to Telegram",
+                                        config = mapOf<String, String>(
+                                            "targetUserId" to (action.targetUserId ?: ""),
+                                            "includeSubject" to action.includeSubject.toString(),
+                                            "includeFrom" to action.includeFrom.toString(),
+                                            "includeBody" to action.includeBody.toString(),
+                                            "summarize" to action.summarize.toString(),
+                                            "messageTemplate" to (action.messageTemplate ?: "")
+                                        )
+                                    )
                                     is MultiUserAction.ReplyToUserGmail -> ActionConfig(
                                         type = ActionType.REPLY_GMAIL,
                                         displayName = "Reply to Gmail",
@@ -784,6 +796,7 @@ enum class ActionType {
     REPLY_GMAIL,
     SEND_TELEGRAM,
     REPLY_TELEGRAM,
+    FORWARD_GMAIL_TO_TELEGRAM, // Forward Gmail content to Telegram
     AI_ANALYZE,
     AI_SUMMARIZE,
     AI_TRANSLATE,
@@ -974,6 +987,14 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
         ActionType.SEND_TELEGRAM -> MultiUserAction.SendToUserTelegram(
             targetUserId = config.config["targetUserId"] ?: users.firstOrNull()?.id ?: "",
             text = config.config["text"] ?: "Workflow notification"
+        )
+        ActionType.FORWARD_GMAIL_TO_TELEGRAM -> MultiUserAction.ForwardGmailToTelegram(
+            targetUserId = config.config["targetUserId"] ?: users.firstOrNull()?.id ?: "",
+            includeSubject = config.config["includeSubject"]?.toBoolean() ?: true,
+            includeFrom = config.config["includeFrom"]?.toBoolean() ?: true,
+            includeBody = config.config["includeBody"]?.toBoolean() ?: true,
+            summarize = config.config["summarize"]?.toBoolean() ?: false,
+            messageTemplate = config.config["messageTemplate"]
         )
         ActionType.AI_ANALYZE -> MultiUserAction.AIAnalyzeText(
             inputText = config.config["inputText"] ?: "{{trigger_content}}",
@@ -1478,20 +1499,33 @@ fun TriggerOptionCard(
             if (configurable && showConfig) {
                 Spacer(modifier = Modifier.height(12.dp))
                 configFields.forEach { (key, label) ->
-                    OutlinedTextField(
-                        value = currentConfig[key] ?: "",
-                        onValueChange = { onConfigChange?.invoke(key, it) },
-                        label = { Text(label) },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
+                    if (key == "targetUserId" && (title.contains("Telegram") || title.contains("telegram"))) {
+                        // Use contact selector for Telegram actions
+                        com.localllm.myapplication.ui.components.TelegramContactSelector(
+                            selectedContactId = currentConfig[key],
+                            onContactSelected = { contactId, contactName ->
+                                onConfigChange?.invoke(key, contactId)
+                                onConfigChange?.invoke("contactName", contactName)
+                            },
+                            label = "Select Telegram Contact",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = currentConfig[key] ?: "",
+                            onValueChange = { onConfigChange?.invoke(key, it) },
+                            label = { Text(label) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 Button(
                     onClick = onClick,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Use This Trigger")
+                    Text("Use This Action")
                 }
             }
         }
@@ -1602,9 +1636,16 @@ fun ActionPickerDialog(
                                     description = "Send a message via Telegram bot",
                                     icon = "✈️",
                                     onClick = {
+                                        val contactName = actionConfig["contactName"]
+                                        val messageText = actionConfig["text"]?.take(20) ?: "message"
+                                        val displayName = if (contactName != null) {
+                                            "Send \"$messageText\" to $contactName"
+                                        } else {
+                                            "Send Telegram: $messageText"
+                                        }
                                         onActionSelected(ActionConfig(
                                             type = ActionType.SEND_TELEGRAM,
-                                            displayName = "Send Telegram: ${actionConfig["text"]?.take(20) ?: "message"}",
+                                            displayName = displayName,
                                             config = actionConfig
                                         ))
                                     },
@@ -1613,7 +1654,43 @@ fun ActionPickerDialog(
                                     onConfigChange = { key, value ->
                                         actionConfig = actionConfig + (key to value)
                                     },
-                                    configFields = listOf("text" to "Message text")
+                                    configFields = listOf(
+                                        "targetUserId" to "Target User ID",
+                                        "text" to "Message text"
+                                    )
+                                )
+                            }
+                            item {
+                                ActionOptionCard(
+                                    title = "Forward Gmail to Telegram",
+                                    description = "Forward Gmail content to Telegram with customizable format",
+                                    icon = "📧➡️✈️",
+                                    onClick = {
+                                        val contactName = actionConfig["contactName"]
+                                        val displayName = if (contactName != null) {
+                                            "Forward Gmail to $contactName"
+                                        } else {
+                                            "Forward Gmail to Telegram"
+                                        }
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.FORWARD_GMAIL_TO_TELEGRAM,
+                                            displayName = displayName,
+                                            config = actionConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = actionConfig,
+                                    onConfigChange = { key, value ->
+                                        actionConfig = actionConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "targetUserId" to "Target User ID",
+                                        "includeSubject" to "Include Subject (true/false)",
+                                        "includeFrom" to "Include From (true/false)",
+                                        "includeBody" to "Include Body (true/false)",
+                                        "summarize" to "Summarize with AI (true/false)",
+                                        "messageTemplate" to "Custom Message Template (optional)"
+                                    )
                                 )
                             }
                             item {
@@ -1622,9 +1699,15 @@ fun ActionPickerDialog(
                                     description = "Reply to the original Telegram message",
                                     icon = "💬",
                                     onClick = {
+                                        val contactName = actionConfig["contactName"]
+                                        val displayName = if (contactName != null) {
+                                            "Reply to $contactName on Telegram"
+                                        } else {
+                                            "Reply to Telegram"
+                                        }
                                         onActionSelected(ActionConfig(
                                             type = ActionType.REPLY_TELEGRAM,
-                                            displayName = "Reply to Telegram",
+                                            displayName = displayName,
                                             config = actionConfig
                                         ))
                                     },
@@ -1633,7 +1716,10 @@ fun ActionPickerDialog(
                                     onConfigChange = { key, value ->
                                         actionConfig = actionConfig + (key to value)
                                     },
-                                    configFields = listOf("text" to "Reply text")
+                                    configFields = listOf(
+                                        "targetUserId" to "Target User ID",
+                                        "text" to "Reply text"
+                                    )
                                 )
                             }
                         }
@@ -1885,7 +1971,18 @@ fun ActionOptionCard(
             if (configurable && showConfig) {
                 Spacer(modifier = Modifier.height(12.dp))
                 configFields.forEach { (key, label) ->
-                    if (key == "body" || key == "text") {
+                    if (key == "targetUserId" && (title.contains("Telegram") || title.contains("telegram"))) {
+                        // Use contact selector for Telegram actions
+                        com.localllm.myapplication.ui.components.TelegramContactSelector(
+                            selectedContactId = currentConfig[key],
+                            onContactSelected = { contactId, contactName ->
+                                onConfigChange?.invoke(key, contactId)
+                                onConfigChange?.invoke("contactName", contactName)
+                            },
+                            label = "Select Telegram Contact",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else if (key == "body" || key == "text") {
                         OutlinedTextField(
                             value = currentConfig[key] ?: "",
                             onValueChange = { onConfigChange?.invoke(key, it) },
@@ -2264,6 +2361,7 @@ fun ActionPreview(
             val icon = when (action.type) {
                 ActionType.SEND_GMAIL, ActionType.REPLY_GMAIL -> "📧"
                 ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM -> "✈️"
+                ActionType.FORWARD_GMAIL_TO_TELEGRAM -> "📧➡️✈️"
                 ActionType.AI_ANALYZE -> "🧠"
                 ActionType.AI_SUMMARIZE -> "📝"
                 ActionType.AI_TRANSLATE -> "🌐"
@@ -2300,6 +2398,7 @@ fun ActionPreview(
                         ActionType.REPLY_GMAIL -> "Reply to Gmail email"
                         ActionType.SEND_TELEGRAM -> "Send Telegram message"
                         ActionType.REPLY_TELEGRAM -> "Reply to Telegram message"
+                        ActionType.FORWARD_GMAIL_TO_TELEGRAM -> "Forward Gmail content to Telegram"
                         ActionType.AI_ANALYZE -> "Analyze content with AI"
                         ActionType.AI_SUMMARIZE -> "Summarize content with AI"
                         ActionType.AI_TRANSLATE -> "Translate text with AI"
@@ -2807,6 +2906,30 @@ fun validateAction(action: ActionConfig, inputData: Map<String, String>, users: 
                 )
             }
         }
+        ActionType.FORWARD_GMAIL_TO_TELEGRAM -> {
+            val targetUserId = action.config["targetUserId"]
+            val includeSubject = action.config["includeSubject"]?.toBoolean() ?: true
+            val includeFrom = action.config["includeFrom"]?.toBoolean() ?: true
+            val includeBody = action.config["includeBody"]?.toBoolean() ?: true
+            
+            if (targetUserId.isNullOrBlank()) {
+                ActionValidationResult(
+                    message = "⚠️ No target user specified",
+                    status = WorkflowTestStatus.WARNING
+                )
+            } else {
+                val parts = mutableListOf<String>()
+                if (includeFrom) parts.add("sender")
+                if (includeSubject) parts.add("subject") 
+                if (includeBody) parts.add("body")
+                
+                ActionValidationResult(
+                    message = "✓ Will forward Gmail content (${parts.joinToString(", ")}) to Telegram",
+                    status = WorkflowTestStatus.SUCCESS,
+                    details = mapOf("targetUser" to targetUserId, "includes" to parts.joinToString(", "))
+                )
+            }
+        }
         ActionType.AI_ANALYZE -> {
             val prompt = action.config["prompt"]
             val outputVar = action.config["outputVar"] ?: "ai_analysis"
@@ -3028,6 +3151,10 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
         when (action.type) {
             ActionType.SEND_GMAIL, ActionType.REPLY_GMAIL -> platforms.add(WorkflowPlatform.GMAIL)
             ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM -> platforms.add(WorkflowPlatform.TELEGRAM)
+            ActionType.FORWARD_GMAIL_TO_TELEGRAM -> {
+                platforms.add(WorkflowPlatform.GMAIL)
+                platforms.add(WorkflowPlatform.TELEGRAM)
+            }
             ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY, 
             ActionType.AI_SMART_SUMMARIZE_AND_FORWARD, ActionType.AI_AUTO_EMAIL_SUMMARIZER -> {
                 platforms.add(WorkflowPlatform.AI)
@@ -3059,7 +3186,7 @@ fun generateTemplateTags(trigger: TriggerConfig, actions: List<ActionConfig>): L
     val hasAI = actions.any { it.type in listOf(ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY) }
     if (hasAI) tags.add("AI")
     
-    val hasCommunication = actions.any { it.type in listOf(ActionType.SEND_GMAIL, ActionType.SEND_TELEGRAM, ActionType.REPLY_GMAIL, ActionType.REPLY_TELEGRAM) }
+    val hasCommunication = actions.any { it.type in listOf(ActionType.SEND_GMAIL, ActionType.SEND_TELEGRAM, ActionType.REPLY_GMAIL, ActionType.REPLY_TELEGRAM, ActionType.FORWARD_GMAIL_TO_TELEGRAM) }
     if (hasCommunication) tags.add("Communication")
     
     val hasDelay = actions.any { it.type == ActionType.DELAY }

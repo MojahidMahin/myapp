@@ -209,6 +209,7 @@ class MultiUserWorkflowEngine(
                 
                 // Telegram Actions
                 is MultiUserAction.SendToUserTelegram -> executeSendToUserTelegram(action, context)
+                is MultiUserAction.ForwardGmailToTelegram -> executeForwardGmailToTelegram(action, context)
                 is MultiUserAction.ReplyToUserTelegram -> executeReplyToUserTelegram(action, context)
                 is MultiUserAction.ForwardUserTelegram -> executeForwardUserTelegram(action, context)
                 
@@ -334,6 +335,82 @@ class MultiUserWorkflowEngine(
         
         return telegramService.sendMessage(chatId, processedText, action.parseMode).map { messageId ->
             "Message sent to Telegram: $messageId"
+        }
+    }
+    
+    private suspend fun executeForwardGmailToTelegram(action: MultiUserAction.ForwardGmailToTelegram, context: WorkflowExecutionContext): Result<String> {
+        val telegramService = userManager.getTelegramService(action.targetUserId)
+            ?: return Result.failure(Exception("Telegram service not available for user"))
+        
+        val targetUser = userManager.getUserById(action.targetUserId).getOrNull()
+            ?: return Result.failure(Exception("Target user not found"))
+        
+        val chatId = action.chatId ?: targetUser.telegramUserId
+            ?: return Result.failure(Exception("No Telegram chat ID available for user"))
+        
+        // Build the message content from Gmail data
+        val messageBuilder = StringBuilder()
+        
+        // Use custom template if provided
+        if (!action.messageTemplate.isNullOrBlank()) {
+            val processedTemplate = replaceVariables(action.messageTemplate, context.variables)
+            messageBuilder.append(processedTemplate)
+        } else {
+            // Default formatting
+            messageBuilder.append("📧 *Gmail Message Forwarded*\n\n")
+            
+            if (action.includeFrom && context.variables.containsKey("email_from")) {
+                messageBuilder.append("👤 *From:* ${context.variables["email_from"]}\n")
+            }
+            
+            if (action.includeSubject && context.variables.containsKey("email_subject")) {
+                messageBuilder.append("📝 *Subject:* ${context.variables["email_subject"]}\n")
+            }
+            
+            if (action.includeBody && context.variables.containsKey("email_body")) {
+                var emailBody = context.variables["email_body"] ?: ""
+                
+                // Summarize if requested
+                if (action.summarize && emailBody.length > 100) {
+                    try {
+                        val summarizeAction = MultiUserAction.AISummarizeContent(
+                            content = emailBody,
+                            maxLength = 150,
+                            outputVariable = "summarized_content"
+                        )
+                        val summarizeResult = aiProcessor.processSummarizeContent(summarizeAction, context)
+                        summarizeResult.fold(
+                            onSuccess = { 
+                                emailBody = context.variables["summarized_content"] ?: emailBody
+                                messageBuilder.append("\n🤖 *AI Summary:*\n")
+                            },
+                            onFailure = { 
+                                Log.w(TAG, "Failed to summarize email content: ${it.message}")
+                                messageBuilder.append("\n📄 *Content:*\n")
+                            }
+                        )
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error during summarization: ${e.message}")
+                        messageBuilder.append("\n📄 *Content:*\n")
+                    }
+                } else {
+                    messageBuilder.append("\n📄 *Content:*\n")
+                }
+                
+                // Truncate if too long
+                if (emailBody.length > 2000) {
+                    emailBody = emailBody.take(2000) + "..."
+                }
+                
+                messageBuilder.append(emailBody)
+            }
+        }
+        
+        val finalMessage = messageBuilder.toString().trim()
+        
+        // Send to Telegram with Markdown formatting
+        return telegramService.sendMessage(chatId, finalMessage, "Markdown").map { messageId ->
+            "Gmail content forwarded to Telegram: $messageId"
         }
     }
     

@@ -205,6 +205,16 @@ sealed class MultiUserAction {
         val parseMode: String? = null
     ) : MultiUserAction()
     
+    data class ForwardGmailToTelegram(
+        val targetUserId: String,
+        val chatId: Long? = null,  // If null, uses user's private chat
+        val includeSubject: Boolean = true,
+        val includeFrom: Boolean = true,
+        val includeBody: Boolean = true,
+        val summarize: Boolean = false,  // Optional AI summarization
+        val messageTemplate: String? = null  // Custom message template
+    ) : MultiUserAction()
+    
     data class ReplyToUserTelegram(
         val targetUserId: String,
         val chatId: Long,

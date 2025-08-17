@@ -206,3 +206,41 @@ data class ProcessedEmailEntity(
     val processedAt: Long = System.currentTimeMillis(),
     val triggerTimestamp: Long // When the email was originally received
 )
+
+@Entity(tableName = "contacts")
+data class ContactEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val gmail: String? = null,
+    val telegramId: String? = null,
+    val telegramUsername: String? = null,
+    val isAutoSaved: Boolean = false,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    fun toContact(): Contact {
+        return Contact(
+            id = id,
+            name = name,
+            gmail = gmail,
+            telegramId = telegramId,
+            telegramUsername = telegramUsername,
+            isAutoSaved = isAutoSaved,
+            createdAt = createdAt,
+            updatedAt = updatedAt
+        )
+    }
+}
+
+fun Contact.toEntity(): ContactEntity {
+    return ContactEntity(
+        id = id,
+        name = name,
+        gmail = gmail,
+        telegramId = telegramId,
+        telegramUsername = telegramUsername,
+        isAutoSaved = isAutoSaved,
+        createdAt = createdAt,
+        updatedAt = updatedAt
+    )
+}

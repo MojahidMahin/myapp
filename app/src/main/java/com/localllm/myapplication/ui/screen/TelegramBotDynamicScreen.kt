@@ -207,6 +207,16 @@ fun TelegramBotDynamicScreen() {
                                 if (newUsers.isNotEmpty()) {
                                     telegramPrefs.saveUsers(newUsers.values.toList())
                                     savedUsers = telegramPrefs.getSavedUsers()
+                                    
+                                    // Auto-save contacts for new Telegram users
+                                    try {
+                                        val contactAutoSaveService = com.localllm.myapplication.di.AppContainer.provideContactAutoSaveService(context)
+                                        newUsers.values.forEach { telegramUser ->
+                                            contactAutoSaveService.autoSaveTelegramContact(telegramUser)
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("TelegramBotScreen", "Failed to auto-save contacts", e)
+                                    }
                                 }
                                 
                                 allUsers = mergedUsers
