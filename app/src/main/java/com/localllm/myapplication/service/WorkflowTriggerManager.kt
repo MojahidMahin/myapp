@@ -1,6 +1,8 @@
 package com.localllm.myapplication.service
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.util.Log
 import androidx.work.*
 import com.localllm.myapplication.data.*
@@ -8,6 +10,7 @@ import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.TelegramBotService
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -232,6 +235,8 @@ class WorkflowTriggerManager(
                 is MultiUserTrigger.GeofenceDwellTrigger -> {
                     TriggerExecutionResult(workflow.id, trigger::class.simpleName ?: "Geofence", false, "Geofence triggers are event-based")
                 }
+                is MultiUserTrigger.ImageAnalysisTrigger -> checkImageAnalysisTrigger(workflow, trigger)
+                is MultiUserTrigger.AutoImageAnalysisTrigger -> checkAutoImageAnalysisTrigger(workflow, trigger)
                 else -> TriggerExecutionResult(workflow.id, trigger::class.simpleName ?: "Unknown", false)
             }
         } catch (e: Exception) {
@@ -870,6 +875,355 @@ class WorkflowTriggerManager(
         val activeWorkflows: Int,
         val lastCheckTime: Long
     )
+    
+    /**
+     * Check Image Analysis trigger
+     */
+    private suspend fun checkImageAnalysisTrigger(
+        workflow: MultiUserWorkflow,
+        trigger: MultiUserTrigger.ImageAnalysisTrigger
+    ): TriggerExecutionResult {
+        return try {
+            Log.i(TAG, "🖼️ === IMAGE ANALYSIS TRIGGER CHECK START ===")
+            Log.i(TAG, "📋 Workflow: ${workflow.name} (ID: ${workflow.id})")
+            Log.i(TAG, "👤 User: ${trigger.userId}")
+            Log.i(TAG, "🏷️ Trigger Name: ${trigger.triggerName}")
+            Log.i(TAG, "📷 Image attachments: ${trigger.imageAttachments.size}")
+            
+            if (trigger.imageAttachments.isEmpty()) {
+                Log.w(TAG, "⚠️ No image attachments provided for image analysis trigger")
+                return TriggerExecutionResult(
+                    workflow.id,
+                    "ImageAnalysisTrigger",
+                    false,
+                    "No image attachments provided"
+                )
+            }
+            
+            // Check rate limiting based on retrigger delay
+            val triggerKey = "${workflow.id}_${trigger.triggerName}"
+            val lastTrigger = lastEmailCheckTimes[triggerKey] ?: 0
+            val currentTime = System.currentTimeMillis()
+            val timeSinceLastTrigger = currentTime - lastTrigger
+            
+            if (timeSinceLastTrigger < trigger.retriggerDelay) {
+                val remainingTime = (trigger.retriggerDelay - timeSinceLastTrigger) / 1000
+                Log.d(TAG, "Rate limiting: Last trigger was ${timeSinceLastTrigger}ms ago, waiting ${remainingTime}s more")
+                return TriggerExecutionResult(
+                    workflow.id,
+                    "ImageAnalysisTrigger",
+                    false,
+                    "Rate limited: triggered ${remainingTime}s ago"
+                )
+            }
+            
+            // Get image analysis service
+            val imageAnalysisService = getImageAnalysisService()
+            if (imageAnalysisService == null) {
+                Log.e(TAG, "❌ Image analysis service not available")
+                return TriggerExecutionResult(
+                    workflow.id,
+                    "ImageAnalysisTrigger",
+                    false,
+                    "Image analysis service not available"
+                )
+            }
+            
+            Log.d(TAG, "🔍 Starting analysis of ${trigger.imageAttachments.size} image(s)")
+            
+            val analysisResults = mutableListOf<ImageAnalysisWorkflowResult>()
+            var hasValidTrigger = false
+            
+            // Analyze each image attachment
+            for ((index, attachment) in trigger.imageAttachments.withIndex()) {
+                Log.d(TAG, "📷 Analyzing image ${index + 1}/${trigger.imageAttachments.size}: ${attachment.fileName}")
+                
+                try {
+                    val bitmap = loadImageFromAttachment(attachment)
+                    if (bitmap == null) {
+                        Log.w(TAG, "❌ Failed to load image: ${attachment.fileName}")
+                        continue
+                    }
+                    
+                    // Combine analysis questions from trigger and attachment
+                    val combinedQuestions = (trigger.analysisQuestions + attachment.analysisQuestions).distinct()
+                    
+                    // Perform image analysis
+                    val analysisResult = imageAnalysisService.analyzeImage(
+                        bitmap = bitmap,
+                        userQuestion = combinedQuestions.joinToString("; ")
+                    )
+                    
+                    if (analysisResult.success) {
+                        // Extract keywords from analysis
+                        val extractedKeywords = extractKeywordsFromAnalysis(analysisResult)
+                        
+                        // Check for keyword matches if required
+                        val keywordMatches = if (trigger.analysisKeywords.isNotEmpty()) {
+                            findKeywordMatches(extractedKeywords, trigger.analysisKeywords)
+                        } else {
+                            emptyList()
+                        }
+                        
+                        // Check if this result should trigger the workflow
+                        val shouldTrigger = if (trigger.triggerOnKeywordMatch) {
+                            keywordMatches.isNotEmpty()
+                        } else {
+                            analysisResult.confidence >= trigger.minimumConfidence
+                        }
+                        
+                        if (shouldTrigger) {
+                            hasValidTrigger = true
+                        }
+                        
+                        val workflowResult = ImageAnalysisWorkflowResult(
+                            attachmentId = attachment.id,
+                            fileName = attachment.fileName,
+                            success = true,
+                            analysisType = trigger.analysisType,
+                            description = analysisResult.description,
+                            ocrText = analysisResult.ocrText,
+                            peopleCount = analysisResult.objectsDetected.peopleCount,
+                            detectedObjects = analysisResult.objectsDetected.detectedObjects,
+                            dominantColors = analysisResult.visualElements.dominantColors,
+                            confidence = analysisResult.confidence,
+                            keywords = extractedKeywords,
+                            keywordMatches = keywordMatches,
+                            visualElements = mapOf(
+                                "brightness" to analysisResult.visualElements.brightness,
+                                "contrast" to analysisResult.visualElements.contrast,
+                                "composition" to analysisResult.visualElements.composition,
+                                "clarity" to analysisResult.visualElements.clarity
+                            ),
+                            analysisTime = System.currentTimeMillis()
+                        )
+                        
+                        analysisResults.add(workflowResult)
+                        
+                        Log.i(TAG, "✅ Analysis completed for ${attachment.fileName}")
+                        Log.d(TAG, "   Confidence: ${analysisResult.confidence}")
+                        Log.d(TAG, "   Keywords found: ${extractedKeywords.size}")
+                        Log.d(TAG, "   Keyword matches: ${keywordMatches.size}")
+                        Log.d(TAG, "   Should trigger: $shouldTrigger")
+                        
+                    } else {
+                        Log.w(TAG, "❌ Analysis failed for ${attachment.fileName}")
+                        analysisResults.add(
+                            ImageAnalysisWorkflowResult(
+                                attachmentId = attachment.id,
+                                fileName = attachment.fileName,
+                                success = false,
+                                analysisType = trigger.analysisType,
+                                description = "Analysis failed",
+                                error = "Image analysis failed"
+                            )
+                        )
+                    }
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "💥 Exception analyzing image ${attachment.fileName}", e)
+                    analysisResults.add(
+                        ImageAnalysisWorkflowResult(
+                            attachmentId = attachment.id,
+                            fileName = attachment.fileName,
+                            success = false,
+                            analysisType = trigger.analysisType,
+                            description = "Analysis failed with exception",
+                            error = e.message
+                        )
+                    )
+                }
+            }
+            
+            if (hasValidTrigger && analysisResults.isNotEmpty()) {
+                // Update last trigger time
+                lastEmailCheckTimes[triggerKey] = currentTime
+                
+                // Create trigger data with analysis results
+                val triggerData = mapOf(
+                    "source" to "image_analysis",
+                    "trigger_name" to trigger.triggerName,
+                    "analysis_type" to trigger.analysisType.name,
+                    "images_analyzed" to analysisResults.size.toString(),
+                    "successful_analyses" to analysisResults.count { it.success }.toString(),
+                    "analysis_results" to analysisResults.joinToString("\n\n") { result ->
+                        "Image: ${result.fileName}\n" +
+                        "Success: ${result.success}\n" +
+                        "Description: ${result.description}\n" +
+                        "OCR Text: ${result.ocrText}\n" +
+                        "People Count: ${result.peopleCount}\n" +
+                        "Objects: ${result.detectedObjects.joinToString(", ")}\n" +
+                        "Keywords: ${result.keywords.joinToString(", ")}\n" +
+                        "Keyword Matches: ${result.keywordMatches.joinToString(", ")}"
+                    },
+                    "type" to "image_analysis_trigger"
+                )
+                
+                Log.i(TAG, "🎯 TRIGGERING WORKFLOW - Image analysis conditions met")
+                Log.i(TAG, "   Analyzed images: ${analysisResults.size}")
+                Log.i(TAG, "   Successful analyses: ${analysisResults.count { it.success }}")
+                
+                executeWorkflowWithData(workflow, trigger.userId, triggerData)
+            } else {
+                Log.d(TAG, "⭕ No trigger conditions met")
+                Log.d(TAG, "   Has valid trigger: $hasValidTrigger")
+                Log.d(TAG, "   Analysis results: ${analysisResults.size}")
+                TriggerExecutionResult(
+                    workflow.id,
+                    "ImageAnalysisTrigger",
+                    false,
+                    "Analysis completed but trigger conditions not met"
+                )
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 ERROR in Image Analysis trigger check", e)
+            TriggerExecutionResult(
+                workflow.id,
+                "ImageAnalysisTrigger",
+                false,
+                "Error: ${e.message}"
+            )
+        } finally {
+            Log.d(TAG, "🏁 === IMAGE ANALYSIS TRIGGER CHECK END ===")
+        }
+    }
+    
+    /**
+     * Check Auto Image Analysis trigger (monitors directory for new images)
+     */
+    private suspend fun checkAutoImageAnalysisTrigger(
+        workflow: MultiUserWorkflow,
+        trigger: MultiUserTrigger.AutoImageAnalysisTrigger
+    ): TriggerExecutionResult {
+        return try {
+            Log.i(TAG, "📁 === AUTO IMAGE ANALYSIS TRIGGER CHECK START ===")
+            Log.i(TAG, "📋 Workflow: ${workflow.name}")
+            Log.i(TAG, "📂 Source directory: ${trigger.sourceDirectory}")
+            
+            // For now, return not implemented
+            // This would monitor a directory for new images and trigger analysis
+            TriggerExecutionResult(
+                workflow.id,
+                "AutoImageAnalysisTrigger",
+                false,
+                "Auto image analysis monitoring not yet implemented"
+            )
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 ERROR in Auto Image Analysis trigger check", e)
+            TriggerExecutionResult(
+                workflow.id,
+                "AutoImageAnalysisTrigger",
+                false,
+                "Error: ${e.message}"
+            )
+        } finally {
+            Log.d(TAG, "🏁 === AUTO IMAGE ANALYSIS TRIGGER CHECK END ===")
+        }
+    }
+    
+    /**
+     * Load image from attachment
+     */
+    private fun loadImageFromAttachment(attachment: ImageAttachment): android.graphics.Bitmap? {
+        return try {
+            when {
+                !attachment.filePath.isNullOrBlank() -> {
+                    val file = File(attachment.filePath)
+                    if (file.exists()) {
+                        BitmapFactory.decodeFile(attachment.filePath)
+                    } else {
+                        Log.w(TAG, "Image file not found: ${attachment.filePath}")
+                        null
+                    }
+                }
+                !attachment.uri.isNullOrBlank() -> {
+                    val uri = Uri.parse(attachment.uri)
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    BitmapFactory.decodeStream(inputStream)
+                }
+                else -> {
+                    Log.w(TAG, "No valid image source in attachment: ${attachment.fileName}")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading image from attachment: ${attachment.fileName}", e)
+            null
+        }
+    }
+    
+    /**
+     * Extract keywords from image analysis result
+     */
+    private fun extractKeywordsFromAnalysis(analysisResult: com.localllm.myapplication.service.ImageAnalysisResult): List<String> {
+        val keywords = mutableSetOf<String>()
+        
+        // Extract from OCR text
+        if (analysisResult.ocrText.isNotBlank()) {
+            keywords.addAll(
+                analysisResult.ocrText
+                    .split(Regex("[\\s,;.!?]+"))
+                    .filter { it.length > 2 }
+                    .map { it.lowercase() }
+            )
+        }
+        
+        // Extract from description
+        keywords.addAll(
+            analysisResult.description
+                .split(Regex("[\\s,;.!?]+"))
+                .filter { it.length > 2 }
+                .map { it.lowercase() }
+        )
+        
+        // Add detected objects
+        keywords.addAll(analysisResult.objectsDetected.detectedObjects.map { it.lowercase() })
+        
+        // Add dominant colors
+        keywords.addAll(analysisResult.visualElements.dominantColors.map { it.lowercase() })
+        
+        return keywords.toList()
+    }
+    
+    /**
+     * Find keyword matches between extracted and target keywords
+     */
+    private fun findKeywordMatches(extractedKeywords: List<String>, targetKeywords: List<String>): List<String> {
+        val matches = mutableListOf<String>()
+        
+        for (target in targetKeywords) {
+            val targetLower = target.lowercase()
+            
+            // Exact match
+            if (extractedKeywords.any { it.lowercase() == targetLower }) {
+                matches.add(target)
+                continue
+            }
+            
+            // Partial match (target keyword contains or is contained in extracted keyword)
+            if (extractedKeywords.any { 
+                it.lowercase().contains(targetLower) || targetLower.contains(it.lowercase())
+            }) {
+                matches.add(target)
+            }
+        }
+        
+        return matches.distinct()
+    }
+    
+    /**
+     * Get image analysis service instance
+     */
+    private fun getImageAnalysisService(): ImageAnalysisService? {
+        return try {
+            ImageAnalysisService()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create image analysis service", e)
+            null
+        }
+    }
 }
 
 /**

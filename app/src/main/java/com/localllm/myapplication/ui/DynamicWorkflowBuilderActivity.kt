@@ -918,7 +918,9 @@ enum class TriggerType {
     MANUAL_TRIGGER,
     GEOFENCE_ENTER,
     GEOFENCE_EXIT,
-    GEOFENCE_DWELL
+    GEOFENCE_DWELL,
+    IMAGE_ANALYSIS,
+    AUTO_IMAGE_ANALYSIS
 }
 
 enum class ActionType {
@@ -1131,6 +1133,28 @@ fun convertTriggerConfig(config: TriggerConfig, userId: String): MultiUserTrigge
             dwellTimeMillis = config.config["dwellTimeMillis"]?.toLongOrNull() ?: 300000L,
             placeId = config.config["placeId"]
         )
+        TriggerType.IMAGE_ANALYSIS -> MultiUserTrigger.ImageAnalysisTrigger(
+            userId = userId,
+            triggerName = config.config["triggerName"] ?: "Image Analysis Trigger",
+            imageAttachments = emptyList(), // Will be populated when images are attached
+            analysisKeywords = config.config["analysisKeywords"]?.split(",")?.map { it.trim() } ?: emptyList(),
+            analysisType = ImageAnalysisType.COMPREHENSIVE,
+            triggerOnKeywordMatch = true,
+            minimumConfidence = config.config["minimumConfidence"]?.toFloatOrNull() ?: 0.5f,
+            enableOCR = true,
+            enableObjectDetection = true,
+            enablePeopleDetection = true
+        )
+        TriggerType.AUTO_IMAGE_ANALYSIS -> MultiUserTrigger.AutoImageAnalysisTrigger(
+            userId = userId,
+            triggerName = config.config["triggerName"] ?: "Auto Image Analysis",
+            sourceDirectory = config.config["sourceDirectory"],
+            analysisKeywords = config.config["analysisKeywords"]?.split(",")?.map { it.trim() } ?: emptyList(),
+            analysisType = ImageAnalysisType.COMPREHENSIVE,
+            enableOCR = config.config["enableOCR"]?.toBooleanStrictOrNull() ?: true,
+            enableObjectDetection = config.config["enableObjectDetection"]?.toBooleanStrictOrNull() ?: true,
+            enablePeopleDetection = true
+        )
         else -> MultiUserTrigger.ManualTrigger(name = "Default")
     }
 }
@@ -1310,7 +1334,7 @@ fun TriggerPickerDialog(
     var selectedCategory by remember { mutableStateOf("Gmail") }
     var triggerConfig by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     
-    val categories = listOf("Gmail", "Telegram", "Location", "Manual")
+    val categories = listOf("Gmail", "Telegram", "Location", "Manual", "Image Analysis")
     
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -1594,6 +1618,57 @@ fun TriggerPickerDialog(
                                         triggerConfig = triggerConfig + (key to value)
                                     },
                                     configFields = listOf("name" to "Button name")
+                                )
+                            }
+                        }
+                        "Image Analysis" -> {
+                            item {
+                                TriggerOptionCard(
+                                    title = "Image Analysis Trigger",
+                                    description = "Triggers when uploaded images match analysis criteria",
+                                    icon = "📸",
+                                    onClick = {
+                                        onTriggerSelected(TriggerConfig(
+                                            type = TriggerType.IMAGE_ANALYSIS,
+                                            displayName = "Image Analysis: ${triggerConfig["triggerName"] ?: "Analyze Images"}",
+                                            config = triggerConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = triggerConfig,
+                                    onConfigChange = { key, value ->
+                                        triggerConfig = triggerConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "triggerName" to "Trigger Name",
+                                        "analysisKeywords" to "Keywords to look for (comma-separated)",
+                                        "minimumConfidence" to "Minimum confidence (0.0-1.0)"
+                                    )
+                                )
+                            }
+                            item {
+                                TriggerOptionCard(
+                                    title = "Auto Image Analysis",
+                                    description = "Automatically analyzes images from other triggers",
+                                    icon = "🤖",
+                                    onClick = {
+                                        onTriggerSelected(TriggerConfig(
+                                            type = TriggerType.AUTO_IMAGE_ANALYSIS,
+                                            displayName = "Auto Analysis: ${triggerConfig["triggerName"] ?: "Auto Analyze"}",
+                                            config = triggerConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = triggerConfig,
+                                    onConfigChange = { key, value ->
+                                        triggerConfig = triggerConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "triggerName" to "Trigger Name",
+                                        "analysisKeywords" to "Keywords to monitor (comma-separated)",
+                                        "enableOCR" to "Enable OCR (true/false)",
+                                        "enableObjectDetection" to "Enable object detection (true/false)"
+                                    )
                                 )
                             }
                         }
@@ -2542,6 +2617,7 @@ fun TriggerPreview(trigger: TriggerConfig) {
                 TriggerType.SCHEDULED_TIME -> "⏰"
                 TriggerType.MANUAL_TRIGGER -> "🎯"
                 TriggerType.GEOFENCE_ENTER, TriggerType.GEOFENCE_EXIT, TriggerType.GEOFENCE_DWELL -> "📍"
+                TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS -> "📸"
             }
             
             Text(
@@ -2569,6 +2645,8 @@ fun TriggerPreview(trigger: TriggerConfig) {
                         TriggerType.GEOFENCE_ENTER -> "Triggers when entering a location"
                         TriggerType.GEOFENCE_EXIT -> "Triggers when leaving a location"
                         TriggerType.GEOFENCE_DWELL -> "Triggers when staying at a location"
+                        TriggerType.IMAGE_ANALYSIS -> "Analyzes uploaded images for specific content"
+                        TriggerType.AUTO_IMAGE_ANALYSIS -> "Automatically analyzes images from other sources"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -3328,6 +3406,16 @@ fun generateSampleTriggerData(trigger: TriggerConfig): Map<String, String> {
                 "trigger_name" to (trigger.config["name"] ?: "Manual Trigger")
             )
         }
+        TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS -> {
+            mapOf(
+                "trigger_content" to "Image analysis trigger activated",
+                "image_analysis_result" to "Sample image contains: person, car, building",
+                "image_analysis_ocr" to "Sample OCR text extracted from image",
+                "image_analysis_confidence" to "85",
+                "image_analysis_people_count" to "2",
+                "image_analysis_objects" to "person, car, building, tree"
+            )
+        }
         TriggerType.GEOFENCE_ENTER -> {
             val locationName = trigger.config["locationName"] ?: "Test Location"
             mapOf(
@@ -3432,6 +3520,9 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
         TriggerType.TELEGRAM_NEW_MESSAGE, TriggerType.TELEGRAM_COMMAND, TriggerType.TELEGRAM_FROM_USER -> {
             platforms.add(WorkflowPlatform.TELEGRAM)
         }
+        TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS -> {
+            platforms.add(WorkflowPlatform.AI)
+        }
         else -> {}
     }
     
@@ -3474,6 +3565,7 @@ fun generateTemplateTags(trigger: TriggerConfig, actions: List<ActionConfig>): L
         TriggerType.SCHEDULED_TIME -> tags.add("Scheduled")
         TriggerType.MANUAL_TRIGGER -> tags.add("Manual")
         TriggerType.GEOFENCE_ENTER, TriggerType.GEOFENCE_EXIT, TriggerType.GEOFENCE_DWELL -> tags.add("Location")
+        TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS -> tags.add("Image Analysis")
     }
     
     // Add action-based tags

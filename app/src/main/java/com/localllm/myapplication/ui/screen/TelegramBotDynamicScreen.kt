@@ -10,12 +10,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localllm.myapplication.command.model.GetUpdatesResponse
@@ -50,6 +60,7 @@ import kotlin.text.trim
 import kotlin.to
 import kotlin.toString
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TelegramBotDynamicScreen() {
     val context = LocalContext.current
@@ -111,49 +122,34 @@ fun TelegramBotDynamicScreen() {
     val scrollState = rememberScrollState()
     
     Surface(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
     ) {
         Column(
             modifier = Modifier
                 .verticalScroll(scrollState)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-
-            OutlinedTextField(
-                value = botToken,
-                onValueChange = { 
+            // Beautiful Header Card
+            ModernTelegramHeader()
+            
+            // Bot Token Section
+            ModernBotTokenCard(
+                botToken = botToken,
+                onTokenChange = { 
                     botToken = it
                     tokenValidationMessage = ""
                 },
-                label = { Text("Bot Token") },
-                modifier = Modifier.fillMaxWidth(),
-                supportingText = {
-                    if (tokenValidationMessage.isNotEmpty()) {
-                        Text(
-                            text = tokenValidationMessage,
-                            color = if (tokenValidationMessage.contains("Valid")) Color.Green else Color.Red
-                        )
-                    }
-                }
+                validationMessage = tokenValidationMessage,
+                savedToken = if (telegramPrefs.hasBotToken()) telegramPrefs.getBotToken() else null
             )
-            
-            if (telegramPrefs.hasBotToken()) {
-                Text(
-                    text = "Saved token: ${TelegramUtils.formatTokenForDisplay(telegramPrefs.getBotToken())}",
-                    color = Color.Gray,
-                    fontSize = 12.sp
-                )
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
+
+            // Action Buttons Section - Horizontal Scrollable Row
+            ModernActionButtonsSection(
+                onFetchUpdates = {
                         scope.launch {
                             try {
                                 val trimmedToken = botToken.trim()
@@ -263,13 +259,7 @@ fun TelegramBotDynamicScreen() {
                         }
                     }
                 },
-                modifier = Modifier.weight(1f)
-            ) {
-                Text("Fetch Updates & User IDs")
-            }
-            
-            Button(
-                onClick = {
+                onClearUpdates = {
                     scope.launch {
                         try {
                             val trimmedToken = botToken.trim()
@@ -296,14 +286,56 @@ fun TelegramBotDynamicScreen() {
                             receivedMessage = "❌ Error clearing updates: ${e.message}"
                         }
                     }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Red.copy(alpha = 0.8f))
-            ) {
-                Text("Clear Updates")
-            }
-        }
+                }
+            )
 
+            // Users Management Section
             if (allUserIds.isNotEmpty()) {
+                ModernUsersSection(
+                    savedUsers = savedUsers,
+                    allUsers = allUsers,
+                    allUserIds = allUserIds,
+                    selectedUserIds = selectedUserIds,
+                    onSelectAll = { selectedUserIds = allUserIds },
+                    onClearSelection = { 
+                        selectedUserIds = emptySet()
+                        targetUserId = ""
+                    },
+                    onDeleteAll = {
+                        scope.launch {
+                            telegramPrefs.clearAllUsers()
+                            savedUsers = emptyMap()
+                            allUsers = emptyMap()
+                            allUserIds = emptySet()
+                            selectedUserIds = emptySet()
+                            receivedMessage = "✅ All users deleted permanently"
+                        }
+                    },
+                    onUserSelectionChanged = { id, isSelected ->
+                        selectedUserIds = if (isSelected) {
+                            selectedUserIds + id
+                        } else {
+                            selectedUserIds - id
+                        }
+                        targetUserId = selectedUserIds.firstOrNull()?.toString() ?: ""
+                    },
+                    onDeleteUser = { id ->
+                        scope.launch {
+                            telegramPrefs.deleteUser(id)
+                            savedUsers = telegramPrefs.getSavedUsers()
+                            allUsers = savedUsers
+                            allUserIds = savedUsers.keys
+                            selectedUserIds = selectedUserIds - id
+                            if (targetUserId == id.toString()) {
+                                targetUserId = ""
+                            }
+                        }
+                    }
+                )
+            }
+            
+            // The old user section will be replaced 
+            if (false && allUserIds.isNotEmpty()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -440,24 +472,22 @@ fun TelegramBotDynamicScreen() {
                 }
             }
 
-            OutlinedTextField(
-                value = targetUserId,
-                onValueChange = { targetUserId = it },
-                label = { Text("Target User ID") },
-                modifier = Modifier.fillMaxWidth()
+            // Messages and Status Section
+            ModernMessagesSection(
+                receivedMessage = receivedMessage,
+                selectedUserIds = selectedUserIds,
+                allUsers = allUsers
             )
-
-            Text("Last Message:\n$receivedMessage")
-
-            OutlinedTextField(
-                value = messageToSend,
-                onValueChange = { messageToSend = it },
-                label = { Text("Message to Send") },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Button(
-                onClick = {
+            
+            // Message Input and Send Section
+            ModernMessageInputSection(
+                targetUserId = targetUserId,
+                onTargetUserIdChange = { targetUserId = it },
+                messageToSend = messageToSend,
+                onMessageChange = { messageToSend = it },
+                sendStatus = sendStatus,
+                selectedUserIds = selectedUserIds,
+                onSendMessage = {
                     scope.launch {
                         try {
                             val trimmedToken = botToken.trim()
@@ -522,16 +552,634 @@ fun TelegramBotDynamicScreen() {
                             sendStatus = "❌ Network Error: ${e.message}"
                         }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = selectedUserIds.isNotEmpty() || targetUserId.isNotBlank()
-            ) {
-                val targetCount = if (selectedUserIds.isNotEmpty()) selectedUserIds.size else if (targetUserId.isNotBlank()) 1 else 0
-                Text(if (targetCount > 1) "Send Message to $targetCount Users" else "Send Message")
-            }
+                }
+            )
+        }
+    }
+}
 
+@Composable
+private fun ModernTelegramHeader() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Telegram Icon
+            Surface(
+                modifier = Modifier.size(64.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Send,
+                        contentDescription = null,
+                        modifier = Modifier.size(32.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.width(16.dp))
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "🤖 Telegram Bot Manager",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "Connect, manage users, and send messages through your Telegram bot",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernBotTokenCard(
+    botToken: String,
+    onTokenChange: (String) -> Unit,
+    validationMessage: String,
+    savedToken: String?
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Lock,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Bot Token Configuration",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            OutlinedTextField(
+                value = botToken,
+                onValueChange = onTokenChange,
+                label = { Text("Enter Bot Token") },
+                placeholder = { Text("123456789:ABCdefGHIjklMNOpqrsTUVwxyz") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                },
+                supportingText = {
+                    if (validationMessage.isNotEmpty()) {
+                        Text(
+                            text = validationMessage,
+                            color = if (validationMessage.contains("Valid")) 
+                                MaterialTheme.colorScheme.primary 
+                            else 
+                                MaterialTheme.colorScheme.error
+                        )
+                    } else {
+                        Text(
+                            text = "Get your bot token from @BotFather on Telegram",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            )
+            
+            if (savedToken != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Saved: ${TelegramUtils.formatTokenForDisplay(savedToken)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernActionButtonsSection(
+    onFetchUpdates: () -> Unit,
+    onClearUpdates: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Bot Actions",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            // Horizontal scrollable row of buttons that never stack vertically
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Fetch Updates Button
+                Button(
+                    onClick = onFetchUpdates,
+                    modifier = Modifier.widthIn(min = 180.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Fetch Updates")
+                }
+                
+                // Clear Updates Button
+                OutlinedButton(
+                    onClick = onClearUpdates,
+                    modifier = Modifier.widthIn(min = 150.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Clear,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Clear Updates")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernUsersSection(
+    savedUsers: Map<Long, TelegramUser>,
+    allUsers: Map<Long, TelegramUser>,
+    allUserIds: Set<Long>,
+    selectedUserIds: Set<Long>,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onDeleteAll: () -> Unit,
+    onUserSelectionChanged: (Long, Boolean) -> Unit,
+    onDeleteUser: (Long) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header with user count
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Saved Users",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "${savedUsers.size} users found",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            
+            // Action buttons - horizontal scrollable row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = onSelectAll,
+                    modifier = Modifier.widthIn(min = 100.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Select All", fontSize = 12.sp)
+                }
+                
+                OutlinedButton(
+                    onClick = onClearSelection,
+                    modifier = Modifier.widthIn(min = 120.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Clear,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Clear Selection", fontSize = 12.sp)
+                }
+                
+                OutlinedButton(
+                    onClick = onDeleteAll,
+                    modifier = Modifier.widthIn(min = 110.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Delete All", fontSize = 12.sp)
+                }
+            }
+            
+            // Users list
+            LazyColumn(
+                modifier = Modifier
+                    .heightIn(max = 200.dp)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(allUserIds.toList()) { id ->
+                    val user = allUsers[id]
+                    val userName = user?.displayName ?: "Unknown User"
+                    val isSelected = selectedUserIds.contains(id)
+                    
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) 
+                                MaterialTheme.colorScheme.primaryContainer 
+                            else 
+                                MaterialTheme.colorScheme.surface
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onUserSelectionChanged(id, !isSelected)
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    onUserSelectionChanged(id, checked)
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = userName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) 
+                                        MaterialTheme.colorScheme.onPrimaryContainer 
+                                    else 
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "ID: $id",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            IconButton(
+                                onClick = { onDeleteUser(id) }
+                            ) {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete user",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Selected users summary
+            if (selectedUserIds.isNotEmpty()) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = "Selected Users (${selectedUserIds.size})",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        selectedUserIds.take(3).forEach { id ->
+                            val user = allUsers[id]
+                            val userName = user?.displayName ?: "Unknown User"
+                            Text(
+                                text = "• $userName (ID: $id)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                        if (selectedUserIds.size > 3) {
+                            Text(
+                                text = "... and ${selectedUserIds.size - 3} more",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernMessagesSection(
+    receivedMessage: String,
+    selectedUserIds: Set<Long>,
+    allUsers: Map<Long, TelegramUser>
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Email,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Messages & Status",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "Latest Status:",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = receivedMessage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModernMessageInputSection(
+    targetUserId: String,
+    onTargetUserIdChange: (String) -> Unit,
+    messageToSend: String,
+    onMessageChange: (String) -> Unit,
+    sendStatus: String,
+    selectedUserIds: Set<Long>,
+    onSendMessage: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Send,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Send Message",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            OutlinedTextField(
+                value = targetUserId,
+                onValueChange = onTargetUserIdChange,
+                label = { Text("Target User ID (Optional)") },
+                placeholder = { Text("Leave empty to use selected users") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null
+                    )
+                },
+                supportingText = {
+                    if (selectedUserIds.isNotEmpty()) {
+                        Text(
+                            text = "${selectedUserIds.size} users selected above",
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            )
+            
+            OutlinedTextField(
+                value = messageToSend,
+                onValueChange = onMessageChange,
+                label = { Text("Message to Send") },
+                placeholder = { Text("Enter your message here...") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+                maxLines = 5,
+                shape = RoundedCornerShape(12.dp),
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.Email,
+                        contentDescription = null
+                    )
+                }
+            )
+            
+            // Send button that adapts to selection
+            Button(
+                onClick = onSendMessage,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = selectedUserIds.isNotEmpty() || targetUserId.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(
+                    Icons.Default.Send,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                val targetCount = if (selectedUserIds.isNotEmpty()) selectedUserIds.size else if (targetUserId.isNotBlank()) 1 else 0
+                Text(
+                    text = if (targetCount > 1) "Send to $targetCount Users" else "Send Message",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            // Send status
             if (sendStatus.isNotBlank()) {
-                Text(sendStatus)
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = when {
+                        sendStatus.contains("✅") -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                        sendStatus.contains("❌") -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    }
+                ) {
+                    Text(
+                        text = sendStatus,
+                        modifier = Modifier.padding(12.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
             }
         }
     }

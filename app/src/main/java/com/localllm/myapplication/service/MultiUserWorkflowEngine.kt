@@ -230,6 +230,11 @@ class MultiUserWorkflowEngine(
                 is MultiUserAction.AISmartSummarizeAndForward -> executeSmartSummarizeAndForward(action, context)
                 is MultiUserAction.AIAutoEmailSummarizer -> executeAutoEmailSummarizer(action, context)
                 
+                // Image Analysis Actions
+                is MultiUserAction.AIImageAnalysisAction -> executeImageAnalysisAction(action, context)
+                is MultiUserAction.AIBatchImageAnalysisAction -> executeBatchImageAnalysisAction(action, context)
+                is MultiUserAction.AIImageComparisonAction -> executeImageComparisonAction(action, context)
+                
                 // Control Actions
                 is MultiUserAction.RequireApproval -> executeRequireApproval(action, context)
                 is MultiUserAction.ConditionalAction -> executeConditionalAction(action, context)
@@ -1668,6 +1673,492 @@ class MultiUserWorkflowEngine(
             is String -> triggerData
             else -> triggerData.toString()
         }
+    }
+    
+    /**
+     * Execute single image analysis action
+     */
+    private suspend fun executeImageAnalysisAction(
+        action: MultiUserAction.AIImageAnalysisAction, 
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.i(TAG, "🖼️ === EXECUTING IMAGE ANALYSIS ACTION ===")
+            Log.d(TAG, "Analysis type: ${action.analysisType}")
+            Log.d(TAG, "Image source: ${action.imageSource}")
+            Log.d(TAG, "Analysis questions: ${action.analysisQuestions}")
+            
+            // Get image analysis service
+            val imageAnalysisService = ImageAnalysisService()
+            
+            // Load image from source
+            val bitmap = loadImageFromSource(action.imageSource, context)
+            if (bitmap == null) {
+                Log.e(TAG, "❌ Failed to load image from source: ${action.imageSource}")
+                return Result.failure(Exception("Failed to load image from source"))
+            }
+            
+            Log.d(TAG, "✅ Image loaded successfully: ${bitmap.width}x${bitmap.height}")
+            
+            // Prepare analysis questions
+            val combinedQuestions = action.analysisQuestions.joinToString("; ")
+            
+            // Perform image analysis
+            val analysisResult = imageAnalysisService.analyzeImage(
+                bitmap = bitmap,
+                userQuestion = combinedQuestions
+            )
+            
+            if (!analysisResult.success) {
+                Log.e(TAG, "❌ Image analysis failed")
+                return Result.failure(Exception("Image analysis failed: ${analysisResult.description}"))
+            }
+            
+            Log.i(TAG, "✅ Image analysis completed successfully")
+            Log.d(TAG, "   Confidence: ${analysisResult.confidence}")
+            Log.d(TAG, "   OCR Text: ${analysisResult.ocrText.take(100)}...")
+            Log.d(TAG, "   People Count: ${analysisResult.objectsDetected.peopleCount}")
+            Log.d(TAG, "   Objects: ${analysisResult.objectsDetected.detectedObjects.take(5)}")
+            
+            // Store results in context variables
+            context.variables[action.outputVariable] = analysisResult.description
+            context.variables["${action.outputVariable}_ocr"] = analysisResult.ocrText
+            context.variables["${action.outputVariable}_people_count"] = analysisResult.objectsDetected.peopleCount.toString()
+            context.variables["${action.outputVariable}_objects"] = analysisResult.objectsDetected.detectedObjects.joinToString(", ")
+            context.variables["${action.outputVariable}_colors"] = analysisResult.visualElements.dominantColors.joinToString(", ")
+            context.variables["${action.outputVariable}_confidence"] = analysisResult.confidence.toString()
+            
+            // Save analysis to file if requested
+            if (action.saveAnalysisToFile) {
+                try {
+                    val analysisFile = java.io.File(this.context.filesDir, "image_analysis_${context.executionId}.txt")
+                    analysisFile.writeText(analysisResult.description)
+                    context.variables["${action.outputVariable}_file_path"] = analysisFile.absolutePath
+                    Log.d(TAG, "Analysis saved to file: ${analysisFile.absolutePath}")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to save analysis to file", e)
+                }
+            }
+            
+            Result.success("Image analysis completed with confidence ${analysisResult.confidence}")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 ERROR in image analysis action", e)
+            Result.failure(Exception("Image analysis action failed: ${e.message}"))
+        }
+    }
+    
+    /**
+     * Execute batch image analysis action
+     */
+    private suspend fun executeBatchImageAnalysisAction(
+        action: MultiUserAction.AIBatchImageAnalysisAction,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.i(TAG, "📷 === EXECUTING BATCH IMAGE ANALYSIS ACTION ===")
+            Log.d(TAG, "Analyzing ${action.imageSources.size} images")
+            Log.d(TAG, "Analysis type: ${action.analysisType}")
+            Log.d(TAG, "Parallel processing: ${action.parallelProcessing}")
+            
+            val imageAnalysisService = ImageAnalysisService()
+            val results = mutableListOf<ImageAnalysisWorkflowResult>()
+            
+            // Process images in parallel or sequentially
+            if (action.parallelProcessing && action.imageSources.size > 1) {
+                Log.d(TAG, "🔄 Processing images in parallel")
+                
+                val deferredResults = action.imageSources.mapIndexed { index, imageSource ->
+                    scope.async {
+                        analyzeImageFromSource(imageSource, action, context, imageAnalysisService, index)
+                    }
+                }
+                
+                results.addAll(deferredResults.awaitAll().filterNotNull())
+            } else {
+                Log.d(TAG, "🔄 Processing images sequentially")
+                
+                action.imageSources.forEachIndexed { index, imageSource ->
+                    val result = analyzeImageFromSource(imageSource, action, context, imageAnalysisService, index)
+                    if (result != null) {
+                        results.add(result)
+                    }
+                }
+            }
+            
+            Log.i(TAG, "✅ Batch analysis completed: ${results.size}/${action.imageSources.size} successful")
+            
+            // Store individual results if requested
+            if (action.saveIndividualAnalyses) {
+                results.forEachIndexed { index, result ->
+                    context.variables["${action.outputVariable}_${index}_description"] = result.description
+                    context.variables["${action.outputVariable}_${index}_ocr"] = result.ocrText
+                    context.variables["${action.outputVariable}_${index}_people"] = result.peopleCount.toString()
+                    context.variables["${action.outputVariable}_${index}_objects"] = result.detectedObjects.joinToString(", ")
+                }
+            }
+            
+            // Combine results if requested
+            if (action.combineResults) {
+                val combinedDescription = buildString {
+                    appendLine("📊 BATCH IMAGE ANALYSIS SUMMARY")
+                    appendLine("Total images analyzed: ${results.size}")
+                    appendLine("Successful analyses: ${results.count { it.success }}")
+                    appendLine()
+                    
+                    results.forEachIndexed { index, result ->
+                        appendLine("IMAGE ${index + 1}:")
+                        appendLine("File: ${result.fileName}")
+                        appendLine("Success: ${result.success}")
+                        if (result.success) {
+                            appendLine("People Count: ${result.peopleCount}")
+                            appendLine("Objects: ${result.detectedObjects.joinToString(", ")}")
+                            appendLine("OCR Text: ${result.ocrText.take(100)}${if (result.ocrText.length > 100) "..." else ""}")
+                            appendLine("Description: ${result.description.take(200)}${if (result.description.length > 200) "..." else ""}")
+                        } else {
+                            appendLine("Error: ${result.error}")
+                        }
+                        appendLine()
+                    }
+                }
+                
+                context.variables[action.outputVariable] = combinedDescription
+            } else {
+                // Store as separate results
+                context.variables[action.outputVariable] = results.joinToString("\n\n") { result ->
+                    "File: ${result.fileName}\nSuccess: ${result.success}\nDescription: ${result.description}"
+                }
+            }
+            
+            // Summary statistics
+            context.variables["${action.outputVariable}_total_count"] = results.size.toString()
+            context.variables["${action.outputVariable}_success_count"] = results.count { it.success }.toString()
+            context.variables["${action.outputVariable}_total_people"] = results.sumOf { it.peopleCount }.toString()
+            
+            Result.success("Batch analysis completed: ${results.count { it.success }}/${results.size} successful")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 ERROR in batch image analysis action", e)
+            Result.failure(Exception("Batch image analysis action failed: ${e.message}"))
+        }
+    }
+    
+    /**
+     * Execute image comparison action
+     */
+    private suspend fun executeImageComparisonAction(
+        action: MultiUserAction.AIImageComparisonAction,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.i(TAG, "🔍 === EXECUTING IMAGE COMPARISON ACTION ===")
+            Log.d(TAG, "Comparison type: ${action.comparisonType}")
+            Log.d(TAG, "Comparing ${action.comparisonImageSources.size} images with primary image")
+            
+            val imageAnalysisService = ImageAnalysisService()
+            
+            // Load primary image
+            val primaryBitmap = loadImageFromSource(action.primaryImageSource, context)
+            if (primaryBitmap == null) {
+                return Result.failure(Exception("Failed to load primary image"))
+            }
+            
+            // Analyze primary image
+            val primaryAnalysis = imageAnalysisService.analyzeImage(primaryBitmap, "Analyze this image comprehensively")
+            if (!primaryAnalysis.success) {
+                return Result.failure(Exception("Failed to analyze primary image"))
+            }
+            
+            Log.d(TAG, "✅ Primary image analyzed successfully")
+            
+            // Analyze comparison images
+            val comparisonResults = mutableListOf<Pair<String, com.localllm.myapplication.service.ImageAnalysisResult>>()
+            
+            for ((index, comparisonSource) in action.comparisonImageSources.withIndex()) {
+                val comparisonBitmap = loadImageFromSource(comparisonSource, context)
+                if (comparisonBitmap != null) {
+                    val comparisonAnalysis = imageAnalysisService.analyzeImage(comparisonBitmap, "Analyze this image comprehensively")
+                    if (comparisonAnalysis.success) {
+                        comparisonResults.add("Image_${index + 1}" to comparisonAnalysis)
+                        Log.d(TAG, "✅ Comparison image ${index + 1} analyzed successfully")
+                    } else {
+                        Log.w(TAG, "⚠️ Failed to analyze comparison image ${index + 1}")
+                    }
+                } else {
+                    Log.w(TAG, "⚠️ Failed to load comparison image ${index + 1}")
+                }
+            }
+            
+            // Perform comparison based on type
+            val comparisonReport = generateComparisonReport(
+                primaryAnalysis,
+                comparisonResults,
+                action.comparisonType,
+                action.includeDetailedDifferences
+            )
+            
+            // Store results
+            context.variables[action.outputVariable] = comparisonReport
+            context.variables["${action.outputVariable}_comparisons_count"] = comparisonResults.size.toString()
+            
+            Log.i(TAG, "✅ Image comparison completed: ${comparisonResults.size} successful comparisons")
+            
+            Result.success("Image comparison completed with ${comparisonResults.size} successful comparisons")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 ERROR in image comparison action", e)
+            Result.failure(Exception("Image comparison action failed: ${e.message}"))
+        }
+    }
+    
+    /**
+     * Analyze image from source (helper for batch processing)
+     */
+    private suspend fun analyzeImageFromSource(
+        imageSource: ImageSource,
+        action: MultiUserAction.AIBatchImageAnalysisAction,
+        context: WorkflowExecutionContext,
+        imageAnalysisService: ImageAnalysisService,
+        index: Int
+    ): ImageAnalysisWorkflowResult? {
+        return try {
+            val bitmap = loadImageFromSource(imageSource, context)
+            if (bitmap == null) {
+                Log.w(TAG, "❌ Failed to load image ${index + 1}")
+                return ImageAnalysisWorkflowResult(
+                    attachmentId = "batch_$index",
+                    fileName = "Image_${index + 1}",
+                    success = false,
+                    analysisType = action.analysisType,
+                    description = "Failed to load image",
+                    error = "Image loading failed"
+                )
+            }
+            
+            val combinedQuestions = action.analysisQuestions.joinToString("; ")
+            val analysisResult = imageAnalysisService.analyzeImage(bitmap, combinedQuestions)
+            
+            if (analysisResult.success) {
+                Log.d(TAG, "✅ Image ${index + 1} analyzed successfully")
+                ImageAnalysisWorkflowResult(
+                    attachmentId = "batch_$index",
+                    fileName = "Image_${index + 1}",
+                    success = true,
+                    analysisType = action.analysisType,
+                    description = analysisResult.description,
+                    ocrText = analysisResult.ocrText,
+                    peopleCount = analysisResult.objectsDetected.peopleCount,
+                    detectedObjects = analysisResult.objectsDetected.detectedObjects,
+                    dominantColors = analysisResult.visualElements.dominantColors,
+                    confidence = analysisResult.confidence,
+                    visualElements = mapOf(
+                        "brightness" to analysisResult.visualElements.brightness,
+                        "contrast" to analysisResult.visualElements.contrast,
+                        "composition" to analysisResult.visualElements.composition,
+                        "clarity" to analysisResult.visualElements.clarity
+                    )
+                )
+            } else {
+                Log.w(TAG, "❌ Analysis failed for image ${index + 1}")
+                ImageAnalysisWorkflowResult(
+                    attachmentId = "batch_$index",
+                    fileName = "Image_${index + 1}",
+                    success = false,
+                    analysisType = action.analysisType,
+                    description = "Analysis failed",
+                    error = "Image analysis failed"
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 Exception analyzing image ${index + 1}", e)
+            ImageAnalysisWorkflowResult(
+                attachmentId = "batch_$index",
+                fileName = "Image_${index + 1}",
+                success = false,
+                analysisType = action.analysisType,
+                description = "Analysis failed with exception",
+                error = e.message
+            )
+        }
+    }
+    
+    /**
+     * Load image from various sources
+     */
+    private fun loadImageFromSource(imageSource: ImageSource, context: WorkflowExecutionContext): android.graphics.Bitmap? {
+        return try {
+            when (imageSource) {
+                is ImageSource.FilePathSource -> {
+                    val file = java.io.File(imageSource.filePath)
+                    if (file.exists()) {
+                        android.graphics.BitmapFactory.decodeFile(imageSource.filePath)
+                    } else {
+                        Log.w(TAG, "Image file not found: ${imageSource.filePath}")
+                        null
+                    }
+                }
+                is ImageSource.UriSource -> {
+                    val uri = android.net.Uri.parse(imageSource.uri)
+                    val inputStream = this.context.contentResolver.openInputStream(uri)
+                    android.graphics.BitmapFactory.decodeStream(inputStream)
+                }
+                is ImageSource.TriggerImageSource -> {
+                    // Extract image from trigger data
+                    val triggerData = context.triggerData
+                    if (triggerData is Map<*, *>) {
+                        val imagePath = triggerData["image_path_${imageSource.index}"]?.toString()
+                            ?: triggerData["image_path"]?.toString()
+                        if (imagePath != null) {
+                            val file = java.io.File(imagePath)
+                            if (file.exists()) {
+                                android.graphics.BitmapFactory.decodeFile(imagePath)
+                            } else {
+                                null
+                            }
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }
+                is ImageSource.VariableSource -> {
+                    val imagePath = context.variables[imageSource.variableName]
+                    if (imagePath != null) {
+                        val file = java.io.File(imagePath)
+                        if (file.exists()) {
+                            android.graphics.BitmapFactory.decodeFile(imagePath)
+                        } else {
+                            null
+                        }
+                    } else {
+                        null
+                    }
+                }
+                is ImageSource.AttachmentSource -> {
+                    // This would require access to workflow attachments storage
+                    Log.w(TAG, "Attachment source not yet implemented: ${imageSource.attachmentId}")
+                    null
+                }
+                is ImageSource.EmailAttachmentSource -> {
+                    // This would require Gmail integration for attachment access
+                    Log.w(TAG, "Email attachment source not yet implemented: ${imageSource.emailId}")
+                    null
+                }
+                is ImageSource.TelegramPhotoSource -> {
+                    // This would require Telegram integration for photo access
+                    Log.w(TAG, "Telegram photo source not yet implemented: ${imageSource.messageId}")
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading image from source: $imageSource", e)
+            null
+        }
+    }
+    
+    /**
+     * Generate comparison report between primary and comparison images
+     */
+    private fun generateComparisonReport(
+        primaryAnalysis: com.localllm.myapplication.service.ImageAnalysisResult,
+        comparisonResults: List<Pair<String, com.localllm.myapplication.service.ImageAnalysisResult>>,
+        comparisonType: ImageComparisonType,
+        includeDetailedDifferences: Boolean
+    ): String {
+        return buildString {
+            appendLine("🔍 IMAGE COMPARISON REPORT")
+            appendLine("Comparison Type: $comparisonType")
+            appendLine("Primary Image Analysis:")
+            appendLine("  People Count: ${primaryAnalysis.objectsDetected.peopleCount}")
+            appendLine("  Objects: ${primaryAnalysis.objectsDetected.detectedObjects.joinToString(", ")}")
+            appendLine("  Colors: ${primaryAnalysis.visualElements.dominantColors.joinToString(", ")}")
+            appendLine("  OCR Text: ${primaryAnalysis.ocrText.take(100)}${if (primaryAnalysis.ocrText.length > 100) "..." else ""}")
+            appendLine()
+            
+            appendLine("COMPARISON RESULTS:")
+            comparisonResults.forEach { (name, analysis) ->
+                appendLine("$name:")
+                
+                when (comparisonType) {
+                    ImageComparisonType.VISUAL_SIMILARITY -> {
+                        val colorSimilarity = calculateColorSimilarity(primaryAnalysis.visualElements.dominantColors, analysis.visualElements.dominantColors)
+                        appendLine("  Color Similarity: ${String.format("%.1f", colorSimilarity * 100)}%")
+                        
+                        val brightnessDiff = kotlin.math.abs(primaryAnalysis.visualElements.brightness - analysis.visualElements.brightness)
+                        appendLine("  Brightness Difference: ${String.format("%.2f", brightnessDiff)}")
+                    }
+                    
+                    ImageComparisonType.OBJECT_DIFFERENCES -> {
+                        val commonObjects = primaryAnalysis.objectsDetected.detectedObjects.intersect(analysis.objectsDetected.detectedObjects.toSet())
+                        val uniqueToPrimary = primaryAnalysis.objectsDetected.detectedObjects.subtract(analysis.objectsDetected.detectedObjects.toSet())
+                        val uniqueToComparison = analysis.objectsDetected.detectedObjects.subtract(primaryAnalysis.objectsDetected.detectedObjects.toSet())
+                        
+                        appendLine("  Common Objects: ${commonObjects.joinToString(", ")}")
+                        appendLine("  Unique to Primary: ${uniqueToPrimary.joinToString(", ")}")
+                        appendLine("  Unique to Comparison: ${uniqueToComparison.joinToString(", ")}")
+                    }
+                    
+                    ImageComparisonType.TEXT_DIFFERENCES -> {
+                        val primaryWords = primaryAnalysis.ocrText.split(Regex("\\s+")).filter { it.isNotBlank() }.toSet()
+                        val comparisonWords = analysis.ocrText.split(Regex("\\s+")).filter { it.isNotBlank() }.toSet()
+                        
+                        val commonWords = primaryWords.intersect(comparisonWords)
+                        val textSimilarity = if (primaryWords.isNotEmpty() || comparisonWords.isNotEmpty()) {
+                            commonWords.size.toFloat() / maxOf(primaryWords.size, comparisonWords.size)
+                        } else {
+                            1.0f
+                        }
+                        
+                        appendLine("  Text Similarity: ${String.format("%.1f", textSimilarity * 100)}%")
+                        appendLine("  Common Words: ${commonWords.take(10).joinToString(", ")}")
+                    }
+                    
+                    ImageComparisonType.COLOR_DIFFERENCES -> {
+                        val colorSimilarity = calculateColorSimilarity(primaryAnalysis.visualElements.dominantColors, analysis.visualElements.dominantColors)
+                        appendLine("  Color Similarity: ${String.format("%.1f", colorSimilarity * 100)}%")
+                        appendLine("  Primary Colors: ${primaryAnalysis.visualElements.dominantColors.joinToString(", ")}")
+                        appendLine("  Comparison Colors: ${analysis.visualElements.dominantColors.joinToString(", ")}")
+                    }
+                    
+                    ImageComparisonType.STRUCTURAL_DIFFERENCES -> {
+                        appendLine("  Primary Composition: ${primaryAnalysis.visualElements.composition}")
+                        appendLine("  Comparison Composition: ${analysis.visualElements.composition}")
+                        appendLine("  Primary Clarity: ${primaryAnalysis.visualElements.clarity}")
+                        appendLine("  Comparison Clarity: ${analysis.visualElements.clarity}")
+                    }
+                    
+                    ImageComparisonType.COMPREHENSIVE -> {
+                        // Include all comparison types
+                        appendLine("  People Count Difference: ${kotlin.math.abs(primaryAnalysis.objectsDetected.peopleCount - analysis.objectsDetected.peopleCount)}")
+                        
+                        val colorSimilarity = calculateColorSimilarity(primaryAnalysis.visualElements.dominantColors, analysis.visualElements.dominantColors)
+                        appendLine("  Color Similarity: ${String.format("%.1f", colorSimilarity * 100)}%")
+                        
+                        val commonObjects = primaryAnalysis.objectsDetected.detectedObjects.intersect(analysis.objectsDetected.detectedObjects.toSet())
+                        appendLine("  Common Objects: ${commonObjects.size}/${maxOf(primaryAnalysis.objectsDetected.detectedObjects.size, analysis.objectsDetected.detectedObjects.size)}")
+                        
+                        if (includeDetailedDifferences) {
+                            appendLine("  Detailed Analysis:")
+                            appendLine("    Primary: ${primaryAnalysis.description.take(150)}...")
+                            appendLine("    Comparison: ${analysis.description.take(150)}...")
+                        }
+                    }
+                }
+                appendLine()
+            }
+        }
+    }
+    
+    /**
+     * Calculate color similarity between two color lists
+     */
+    private fun calculateColorSimilarity(colors1: List<String>, colors2: List<String>): Float {
+        if (colors1.isEmpty() && colors2.isEmpty()) return 1.0f
+        if (colors1.isEmpty() || colors2.isEmpty()) return 0.0f
+        
+        val commonColors = colors1.intersect(colors2.toSet())
+        return commonColors.size.toFloat() / maxOf(colors1.size, colors2.size)
     }
 }
 

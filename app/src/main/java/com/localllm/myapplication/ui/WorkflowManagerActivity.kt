@@ -14,9 +14,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -494,240 +501,370 @@ private fun GmailTab(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            // Gmail Status Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (gmailSignedIn) 
-                        Color.Green.copy(alpha = 0.1f) 
-                    else 
-                        MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
+            // Modern Gmail Status Card with enhanced styling
+            ModernCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Gmail icon and status indicator
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (gmailSignedIn) AccentGreen.copy(alpha = 0.15f)
+                                else AccentRed.copy(alpha = 0.15f)
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Gmail Integration",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
-                            )
+                        Icon(
+                            Icons.Default.Email,
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            tint = if (gmailSignedIn) AccentGreen else AccentRed
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.width(16.dp))
+                    
+                    // Status information
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Gmail Integration",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        ModernSmallSpacing()
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Status indicator dot
+                            Surface(
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                color = if (gmailSignedIn) AccentGreen else AccentRed,
+                                modifier = Modifier.size(8.dp)
+                            ) {}
+                            
+                            Spacer(modifier = Modifier.width(8.dp))
+                            
                             if (gmailSignedIn && gmailAccount != null) {
-                                Text(
-                                    text = "✅ Signed in as: $gmailAccount",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.Green
-                                )
+                                Column {
+                                    Text(
+                                        text = "Connected",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = AccentGreen,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Text(
+                                        text = gmailAccount,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             } else {
                                 Text(
-                                    text = "❌ Not signed in",
+                                    text = "Not Connected",
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.Red
+                                    color = AccentRed,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
-                        
-                        if (gmailSignedIn) {
-                            ModernDangerButton(
-                                text = "🚪 Sign Out",
-                                onClick = onSignOut
-                            )
-                        } else {
-                            ModernSuccessButton(
-                                text = "🔐 Sign In to Gmail",
-                                onClick = onSignIn
-                            )
-                        }
                     }
+                }
+                
+                ModernSpacing()
+                
+                // Modern action buttons
+                if (gmailSignedIn) {
+                    ModernDangerButton(
+                        text = "Sign Out",
+                        onClick = onSignOut,
+                        modifier = Modifier.height(48.dp)
+                    )
+                } else {
+                    ModernSuccessButton(
+                        text = "Connect Gmail Account",
+                        onClick = onSignIn,
+                        modifier = Modifier.height(48.dp)
+                    )
                 }
             }
         }
         
         if (gmailSignedIn) {
             item {
-                // Email Controls
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Recent Emails",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    
-                    Button(
-                        onClick = onRefreshEmails,
-                        enabled = !isLoadingEmails
-                    ) {
-                        if (isLoadingEmails) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Icon(Icons.Default.Refresh, contentDescription = null)
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Refresh")
-                    }
-                }
-            }
-            
-            item {
-                // Email count input
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
+                // Modern Email Controls Header
+                ModernCard {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Number of emails to fetch:",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        
-                        OutlinedTextField(
-                            value = emailCount,
-                            onValueChange = { newValue ->
-                                // Only allow numeric input
-                                if (newValue.all { it.isDigit() } && newValue.length <= 3) {
-                                    onEmailCountChanged(newValue)
-                                }
-                            },
-                            label = { Text("Count") },
-                            singleLine = true,
-                            modifier = Modifier.width(100.dp),
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number
+                        Column {
+                            Text(
+                                text = "Email Management",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                        )
+                            ModernSmallSpacing()
+                            Text(
+                                text = if (emails.isEmpty()) "No emails loaded" 
+                                      else "${emails.size} emails found",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        
+                        // Modern refresh button
+                        Button(
+                            onClick = onRefreshEmails,
+                            enabled = !isLoadingEmails,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentBlue,
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(48.dp)
+                        ) {
+                            if (isLoadingEmails) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Refresh, 
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (isLoadingEmails) "Loading..." else "Refresh",
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
                     }
                 }
             }
             
             item {
-                // Filter controls
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "Email Filter",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        
-                        // Filter type dropdown
+                // Modern Email Settings Card
+                ModernCard {
+                    Column {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp),
+                                tint = AccentBlue
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = "Filter by:",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
+                                text = "Email Settings",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
+                        }
+                        
+                        ModernSpacing()
+                        
+                        // Email Count Section
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Emails to fetch",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Number of recent emails to load",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                             
-                            var expanded by remember { mutableStateOf(false) }
-                            val filterOptions = listOf(
-                                "all" to "All (Body)",
-                                "subject" to "Subject",
-                                "from" to "From",
-                                "body" to "Body"
+                            OutlinedTextField(
+                                value = emailCount,
+                                onValueChange = { newValue ->
+                                    if (newValue.all { it.isDigit() } && newValue.length <= 3) {
+                                        onEmailCountChanged(newValue)
+                                    }
+                                },
+                                label = { Text("Count") },
+                                singleLine = true,
+                                modifier = Modifier.width(120.dp),
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentBlue,
+                                    focusedLabelColor = AccentBlue
+                                )
                             )
-                            
-                            ExposedDropdownMenuBox(
-                                expanded = expanded,
-                                onExpandedChange = { expanded = !expanded },
-                                modifier = Modifier.width(150.dp)
+                        }
+                        
+                        ModernSpacing()
+                        
+                        // Filter Section
+                        Column {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                OutlinedTextField(
-                                    value = filterOptions.find { it.first == filterType }?.second ?: "All (Body)",
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-                                    modifier = Modifier.menuAnchor(),
-                                    singleLine = true
+                                Icon(
+                                    Icons.Default.Settings,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = AccentOrange
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Email Filters",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            
+                            ModernSmallSpacing()
+                            
+                            // Filter type dropdown
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Filter by:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 
-                                ExposedDropdownMenu(
+                                var expanded by remember { mutableStateOf(false) }
+                                val filterOptions = listOf(
+                                    "all" to "All (Body)",
+                                    "subject" to "Subject",
+                                    "from" to "From",
+                                    "body" to "Body"
+                                )
+                                
+                                ExposedDropdownMenuBox(
                                     expanded = expanded,
-                                    onDismissRequest = { expanded = false }
+                                    onExpandedChange = { expanded = !expanded },
+                                    modifier = Modifier.width(160.dp)
                                 ) {
-                                    filterOptions.forEach { (value, label) ->
-                                        DropdownMenuItem(
-                                            text = { Text(label) },
-                                            onClick = {
-                                                onFilterTypeChanged(value)
-                                                expanded = false
-                                            }
+                                    OutlinedTextField(
+                                        value = filterOptions.find { it.first == filterType }?.second ?: "All (Body)",
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                                        modifier = Modifier.menuAnchor(),
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = AccentBlue
+                                        )
+                                    )
+                                    
+                                    ExposedDropdownMenu(
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false }
+                                    ) {
+                                        filterOptions.forEach { (value, label) ->
+                                            DropdownMenuItem(
+                                                text = { Text(label) },
+                                                onClick = {
+                                                    onFilterTypeChanged(value)
+                                                    expanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            ModernSmallSpacing()
+                            
+                            // Keywords input
+                            OutlinedTextField(
+                                value = filterKeywords,
+                                onValueChange = onFilterKeywordsChanged,
+                                label = { Text("Search Keywords") },
+                                placeholder = { Text("Enter keywords to filter emails...") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Search, 
+                                        contentDescription = null,
+                                        tint = AccentBlue
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (filterKeywords.isNotEmpty()) {
+                                        IconButton(onClick = { onFilterKeywordsChanged("") }) {
+                                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentBlue,
+                                    focusedLabelColor = AccentBlue
+                                )
+                            )
+                            
+                            if (filterKeywords.isNotEmpty()) {
+                                ModernSmallSpacing()
+                                Surface(
+                                    color = AccentBlue.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Settings,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = AccentBlue
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        val filterOptions = listOf(
+                                            "all" to "All (Body)",
+                                            "subject" to "Subject",
+                                            "from" to "From",
+                                            "body" to "Body"
+                                        )
+                                        Text(
+                                            text = "Filtering by ${filterOptions.find { it.first == filterType }?.second?.lowercase()} containing: \"$filterKeywords\"",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = AccentBlue,
+                                            fontWeight = FontWeight.Medium
                                         )
                                     }
                                 }
                             }
-                        }
-                        
-                        // Keywords input
-                        OutlinedTextField(
-                            value = filterKeywords,
-                            onValueChange = onFilterKeywordsChanged,
-                            label = { Text("Keywords") },
-                            placeholder = { Text("Enter keywords to filter emails...") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
-                            leadingIcon = {
-                                Icon(Icons.Default.Search, contentDescription = null)
-                            },
-                            trailingIcon = {
-                                if (filterKeywords.isNotEmpty()) {
-                                    IconButton(onClick = { onFilterKeywordsChanged("") }) {
-                                        Icon(Icons.Default.Clear, contentDescription = "Clear")
-                                    }
-                                }
-                            }
-                        )
-                        
-                        if (filterKeywords.isNotEmpty()) {
-                            val filterOptions = listOf(
-                                "all" to "All (Body)",
-                                "subject" to "Subject",
-                                "from" to "From",
-                                "body" to "Body"
-                            )
-                            Text(
-                                text = "🔍 Filtering emails by ${filterOptions.find { it.first == filterType }?.second?.lowercase()} containing: \"$filterKeywords\"",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
                         }
                     }
                 }
@@ -735,74 +872,120 @@ private fun GmailTab(
             
             if (errorMessage != null) {
                 item {
+                    // Modern Error Card
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = Color.Red.copy(alpha = 0.1f)
-                        )
+                            containerColor = AccentRed.copy(alpha = 0.1f)
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, AccentRed.copy(alpha = 0.3f))
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier.padding(20.dp)
                         ) {
-                            Text(
-                                text = "⚠️ Error",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.Red,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = AccentRed
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = "Connection Error",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = AccentRed,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            
+                            ModernSpacing()
+                            
                             Text(
                                 text = errorMessage,
-                                color = Color.Red,
-                                style = MaterialTheme.typography.bodyMedium
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                lineHeight = 20.sp
                             )
+                            
                             if (errorMessage.contains("Gmail API is not enabled")) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "💡 Next steps:\n1. Visit Google Cloud Console\n2. Enable Gmail API for your project\n3. Wait 2-3 minutes\n4. Try again",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                ModernSpacing()
+                                Surface(
+                                    color = AccentBlue.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp)
+                                    ) {
+                                        Text(
+                                            text = "💡 How to fix this:",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = AccentBlue
+                                        )
+                                        ModernSmallSpacing()
+                                        Text(
+                                            text = "1. Visit Google Cloud Console\n2. Enable Gmail API for your project\n3. Wait 2-3 minutes\n4. Try again",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
             
-            if (emails.isEmpty() && !isLoadingEmails) {
+            if (emails.isEmpty() && !isLoadingEmails && errorMessage == null) {
                 item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
+                    // Modern Empty State
+                    ModernCard {
                         Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
+                            modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                Icons.Default.Email,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
+                            // Empty state illustration
+                            Box(
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(AccentBlue.copy(alpha = 0.1f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Email,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(40.dp),
+                                    tint = AccentBlue
+                                )
+                            }
+                            
+                            ModernSpacing()
+                            
                             Text(
-                                text = "No emails found",
-                                style = MaterialTheme.typography.titleMedium
+                                text = "No Emails Found",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
+                            
+                            ModernSmallSpacing()
+                            
                             Text(
-                                text = "Tap refresh to load your recent emails",
+                                text = "Click the refresh button above to load your recent emails",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
                     }
                 }
-            } else {
+            } else if (!emails.isEmpty()) {
                 items(emails) { email ->
                     EmailCard(email = email)
                 }
@@ -909,10 +1092,20 @@ private fun SettingsTab(
 private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (!email.isRead) 
+                AccentBlue.copy(alpha = 0.05f)
+            else 
+                MaterialTheme.colorScheme.surface
+        ),
+        border = if (!email.isRead) 
+            BorderStroke(1.dp, AccentBlue.copy(alpha = 0.2f))
+        else null
     ) {
         Column(
-            modifier = Modifier.padding(16.dp)
+            modifier = Modifier.padding(20.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -920,29 +1113,104 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
                 verticalAlignment = Alignment.Top
             ) {
                 Column(modifier = Modifier.weight(1f)) {
+                    // Email subject with unread indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (!email.isRead) {
+                            Surface(
+                                shape = androidx.compose.foundation.shape.CircleShape,
+                                color = AccentBlue,
+                                modifier = Modifier.size(6.dp)
+                            ) {}
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+                        
+                        Text(
+                            text = email.subject.ifEmpty { "No Subject" },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = if (!email.isRead) FontWeight.Bold else FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    
+                    ModernSmallSpacing()
+                    
+                    // Sender info with icon
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = email.from.take(50) + if (email.from.length > 50) "..." else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    
+                    ModernSmallSpacing()
+                    
+                    // Email preview
                     Text(
-                        text = email.subject,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = if (!email.isRead) FontWeight.Bold else FontWeight.Normal
-                    )
-                    Text(
-                        text = "From: ${email.from}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = email.body.take(100) + if (email.body.length > 100) "..." else "",
+                        text = email.body.take(120) + if (email.body.length > 120) "..." else "",
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(top = 4.dp)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        lineHeight = 18.sp
                     )
+                    
+                    ModernSmallSpacing()
+                    
+                    // Timestamp
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.DateRange,
+                            contentDescription = null,
+                            modifier = Modifier.size(12.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault())
+                                .format(java.util.Date(email.timestamp)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 
-                if (!email.isRead) {
-                    Surface(
-                        shape = androidx.compose.foundation.shape.CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(8.dp)
-                    ) {}
+                // Status indicator
+                Column(
+                    horizontalAlignment = Alignment.End
+                ) {
+                    if (!email.isRead) {
+                        Surface(
+                            color = AccentBlue,
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.padding(4.dp)
+                        ) {
+                            Text(
+                                text = "NEW",
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }

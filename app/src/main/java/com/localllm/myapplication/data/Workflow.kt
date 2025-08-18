@@ -169,6 +169,39 @@ sealed class MultiUserTrigger {
         val dwellTimeMillis: Long = 300000, // 5 minutes default
         val placeId: String? = null
     ) : MultiUserTrigger()
+    
+    // Image Analysis Triggers
+    data class ImageAnalysisTrigger(
+        val userId: String,
+        val triggerName: String,
+        val imageAttachments: List<ImageAttachment> = emptyList(), // Optional image attachments
+        val analysisQuestions: List<String> = emptyList(), // Questions to ask about images
+        val analysisKeywords: List<String> = emptyList(), // Keywords to look for in analysis
+        val analysisType: ImageAnalysisType = ImageAnalysisType.COMPREHENSIVE,
+        val triggerOnKeywordMatch: Boolean = false, // If true, trigger only when keywords match
+        val minimumConfidence: Float = 0.5f, // Minimum confidence threshold for analysis
+        val retriggerDelay: Long = 300000, // 5 minutes between retriggers for same image
+        val enableOCR: Boolean = true, // Enable text extraction
+        val enableObjectDetection: Boolean = true, // Enable object detection
+        val enablePeopleDetection: Boolean = true // Enable people counting
+    ) : MultiUserTrigger()
+    
+    data class AutoImageAnalysisTrigger(
+        val userId: String,
+        val triggerName: String,
+        val sourceDirectory: String? = null, // Monitor directory for new images (optional)
+        val analysisType: ImageAnalysisType = ImageAnalysisType.COMPREHENSIVE,
+        val fileExtensions: List<String> = listOf("jpg", "jpeg", "png", "webp"), // Supported image formats
+        val maxFileSize: Long = 10 * 1024 * 1024, // 10MB limit
+        val analysisQuestions: List<String> = emptyList(),
+        val analysisKeywords: List<String> = emptyList(),
+        val triggerOnKeywordMatch: Boolean = false,
+        val minimumConfidence: Float = 0.5f,
+        val processingInterval: Long = 60000, // Check for new images every minute
+        val enableOCR: Boolean = true,
+        val enableObjectDetection: Boolean = true,
+        val enablePeopleDetection: Boolean = true
+    ) : MultiUserTrigger()
 }
 
 /**
@@ -291,6 +324,40 @@ sealed class MultiUserAction {
         val context: String? = null,
         val tone: String = "professional",
         val outputVariable: String = "ai_reply"
+    ) : MultiUserAction()
+    
+    // Image Analysis Actions
+    data class AIImageAnalysisAction(
+        val imageSource: ImageSource, // Where to get the image from
+        val analysisType: ImageAnalysisType = ImageAnalysisType.COMPREHENSIVE,
+        val analysisQuestions: List<String> = emptyList(), // Specific questions to ask about the image
+        val enableOCR: Boolean = true,
+        val enableObjectDetection: Boolean = true,
+        val enablePeopleDetection: Boolean = true,
+        val outputVariable: String = "image_analysis_result",
+        val saveAnalysisToFile: Boolean = false, // Save detailed analysis to file
+        val includeVisualDescription: Boolean = true
+    ) : MultiUserAction()
+    
+    data class AIBatchImageAnalysisAction(
+        val imageSources: List<ImageSource>, // Multiple images to analyze
+        val analysisType: ImageAnalysisType = ImageAnalysisType.COMPREHENSIVE,
+        val analysisQuestions: List<String> = emptyList(),
+        val enableOCR: Boolean = true,
+        val enableObjectDetection: Boolean = true,
+        val enablePeopleDetection: Boolean = true,
+        val outputVariable: String = "batch_analysis_results",
+        val combineResults: Boolean = true, // Combine all results into a summary
+        val saveIndividualAnalyses: Boolean = false,
+        val parallelProcessing: Boolean = true // Process images in parallel
+    ) : MultiUserAction()
+    
+    data class AIImageComparisonAction(
+        val primaryImageSource: ImageSource,
+        val comparisonImageSources: List<ImageSource>,
+        val comparisonType: ImageComparisonType = ImageComparisonType.VISUAL_SIMILARITY,
+        val outputVariable: String = "image_comparison_result",
+        val includeDetailedDifferences: Boolean = true
     ) : MultiUserAction()
     
     /**
@@ -449,4 +516,99 @@ sealed class ForwardingDestination {
     data class MultipleDestinations(
         val destinations: List<ForwardingDestination>
     ) : ForwardingDestination()
+}
+
+/**
+ * Image attachment data for workflow triggers
+ */
+data class ImageAttachment(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val fileName: String,
+    val filePath: String? = null, // Local file path
+    val uri: String? = null, // Content URI
+    val fileSize: Long = 0L,
+    val mimeType: String = "image/jpeg",
+    val uploadedAt: Long = System.currentTimeMillis(),
+    val analysisQuestions: List<String> = emptyList(), // Specific questions for this image
+    val metadata: Map<String, String> = emptyMap() // Additional metadata
+)
+
+/**
+ * Types of image analysis to perform
+ */
+enum class ImageAnalysisType {
+    COMPREHENSIVE, // Full analysis including OCR, objects, people, etc.
+    OCR_ONLY, // Only text extraction
+    OBJECT_DETECTION, // Only object detection
+    PEOPLE_DETECTION, // Only people counting
+    QUICK_SCAN, // Fast analysis with basic information
+    CUSTOM // Custom analysis based on specific parameters
+}
+
+/**
+ * Image analysis result data for workflow execution context
+ */
+data class ImageAnalysisWorkflowResult(
+    val attachmentId: String,
+    val fileName: String,
+    val success: Boolean,
+    val analysisType: ImageAnalysisType,
+    val description: String,
+    val ocrText: String = "",
+    val peopleCount: Int = 0,
+    val detectedObjects: List<String> = emptyList(),
+    val dominantColors: List<String> = emptyList(),
+    val confidence: Float = 0f,
+    val keywords: List<String> = emptyList(), // Extracted keywords
+    val keywordMatches: List<String> = emptyList(), // Matched keywords from trigger
+    val visualElements: Map<String, Any> = emptyMap(), // Visual analysis results
+    val analysisTime: Long = System.currentTimeMillis(),
+    val error: String? = null
+)
+
+/**
+ * Image source specification for workflow actions
+ */
+sealed class ImageSource {
+    data class AttachmentSource(
+        val attachmentId: String
+    ) : ImageSource()
+    
+    data class FilePathSource(
+        val filePath: String
+    ) : ImageSource()
+    
+    data class UriSource(
+        val uri: String
+    ) : ImageSource()
+    
+    data class TriggerImageSource(
+        val index: Int = 0 // Which image from trigger (if multiple)
+    ) : ImageSource()
+    
+    data class VariableSource(
+        val variableName: String // Image path/URI stored in workflow variable
+    ) : ImageSource()
+    
+    data class EmailAttachmentSource(
+        val emailId: String,
+        val attachmentIndex: Int = 0
+    ) : ImageSource()
+    
+    data class TelegramPhotoSource(
+        val messageId: String,
+        val photoIndex: Int = 0
+    ) : ImageSource()
+}
+
+/**
+ * Types of image comparison analysis
+ */
+enum class ImageComparisonType {
+    VISUAL_SIMILARITY, // Compare visual similarity
+    OBJECT_DIFFERENCES, // Compare detected objects
+    TEXT_DIFFERENCES, // Compare OCR text
+    COLOR_DIFFERENCES, // Compare color schemes
+    STRUCTURAL_DIFFERENCES, // Compare composition and structure
+    COMPREHENSIVE // All comparison types
 }

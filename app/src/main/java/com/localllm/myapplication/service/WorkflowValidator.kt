@@ -602,6 +602,16 @@ class WorkflowValidator(private val context: Context) {
                     // Generic validation for other action types
                     Log.d(TAG, "Validated action: ${action::class.simpleName}")
                 }
+                
+                is MultiUserAction.AIImageAnalysisAction -> {
+                    validateAIImageAnalysisAction(action, index, errors, warnings)
+                }
+                is MultiUserAction.AIBatchImageAnalysisAction -> {
+                    validateAIBatchImageAnalysisAction(action, index, errors, warnings)
+                }
+                is MultiUserAction.AIImageComparisonAction -> {
+                    validateAIImageComparisonAction(action, index, errors, warnings)
+                }
             }
         }
     }
@@ -674,6 +684,15 @@ class WorkflowValidator(private val context: Context) {
                 }
                 is MultiUserAction.LogAction -> {
                     extractVariables(action.message, usedVariables)
+                }
+                is MultiUserAction.AIImageAnalysisAction -> {
+                    definedVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AIBatchImageAnalysisAction -> {
+                    definedVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AIImageComparisonAction -> {
+                    definedVariables.add(action.outputVariable)
                 }
                 is MultiUserAction.AISummarizeContent -> {
                     extractVariables(action.content, usedVariables)
@@ -794,6 +813,15 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.GmailAISummaryToTelegram -> {
                     aiOutputVariables.add(action.outputSummaryVariable)
                 }
+                is MultiUserAction.AIImageAnalysisAction -> {
+                    aiOutputVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AIBatchImageAnalysisAction -> {
+                    aiOutputVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AIImageComparisonAction -> {
+                    aiOutputVariables.add(action.outputVariable)
+                }
                 is MultiUserAction.ConditionalAction -> conditionalActions.add(action)
                 // Non-AI actions don't produce output variables
                 is MultiUserAction.SendToUserGmail,
@@ -871,5 +899,85 @@ class WorkflowValidator(private val context: Context) {
         }
         
         return summary
+    }
+    
+    /**
+     * Validate AI Image Analysis Action
+     */
+    private fun validateAIImageAnalysisAction(
+        action: MultiUserAction.AIImageAnalysisAction, 
+        index: Int,
+        errors: MutableList<ValidationError>,
+        warnings: MutableList<ValidationWarning>
+    ) {
+        if (action.outputVariable.isBlank()) {
+            errors.add(
+                ValidationError(
+                    "EMPTY_OUTPUT_VARIABLE",
+                    "AI Image Analysis action at index $index has empty output variable",
+                    suggestedFix = "Provide an output variable name"
+                )
+            )
+        }
+    }
+    
+    /**
+     * Validate AI Batch Image Analysis Action
+     */
+    private fun validateAIBatchImageAnalysisAction(
+        action: MultiUserAction.AIBatchImageAnalysisAction, 
+        index: Int,
+        errors: MutableList<ValidationError>,
+        warnings: MutableList<ValidationWarning>
+    ) {
+        if (action.outputVariable.isBlank()) {
+            errors.add(
+                ValidationError(
+                    "EMPTY_OUTPUT_VARIABLE",
+                    "AI Batch Image Analysis action at index $index has empty output variable",
+                    suggestedFix = "Provide an output variable name"
+                )
+            )
+        }
+        
+        if (action.imageSources.isEmpty()) {
+            warnings.add(
+                ValidationWarning(
+                    "NO_IMAGE_SOURCES",
+                    "AI Batch Image Analysis action at index $index has no image sources configured",
+                    "Configure image sources for batch processing"
+                )
+            )
+        }
+    }
+    
+    /**
+     * Validate AI Image Comparison Action
+     */
+    private fun validateAIImageComparisonAction(
+        action: MultiUserAction.AIImageComparisonAction, 
+        index: Int,
+        errors: MutableList<ValidationError>,
+        warnings: MutableList<ValidationWarning>
+    ) {
+        if (action.outputVariable.isBlank()) {
+            errors.add(
+                ValidationError(
+                    "EMPTY_OUTPUT_VARIABLE",
+                    "AI Image Comparison action at index $index has empty output variable",
+                    suggestedFix = "Provide an output variable name"
+                )
+            )
+        }
+        
+        if (action.comparisonImageSources.isEmpty()) {
+            warnings.add(
+                ValidationWarning(
+                    "NO_COMPARISON_IMAGES",
+                    "AI Image Comparison action at index $index has no comparison images configured",
+                    "Configure at least one comparison image source"
+                )
+            )
+        }
     }
 }
