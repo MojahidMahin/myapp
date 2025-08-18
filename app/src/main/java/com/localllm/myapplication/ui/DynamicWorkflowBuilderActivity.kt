@@ -29,6 +29,7 @@ import com.localllm.myapplication.data.*
 import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.TelegramBotService
+import com.localllm.myapplication.service.GeofencingService
 import com.localllm.myapplication.ui.theme.MyApplicationTheme
 import com.localllm.myapplication.ui.theme.*
 import kotlinx.coroutines.launch
@@ -173,6 +174,13 @@ fun DynamicWorkflowBuilderScreen(
                                             "text" to (action.text ?: "")
                                         )
                                     )
+                                    is MultiUserAction.AutoReplyTelegram -> ActionConfig(
+                                        type = ActionType.AUTO_REPLY_TELEGRAM,
+                                        displayName = "Auto-Reply Telegram",
+                                        config = mapOf<String, String>(
+                                            "autoReplyText" to action.autoReplyText
+                                        )
+                                    )
                                     is MultiUserAction.ForwardGmailToTelegram -> ActionConfig(
                                         type = ActionType.FORWARD_GMAIL_TO_TELEGRAM,
                                         displayName = "Forward Gmail to Telegram",
@@ -262,7 +270,8 @@ fun DynamicWorkflowBuilderScreen(
                                             isCreating = false
                                         },
                                         editWorkflowId = editWorkflowId,
-                                        isEditMode = isEditMode
+                                        isEditMode = isEditMode,
+                                        context = context
                                     )
                                 }
                             } else {
@@ -796,6 +805,7 @@ enum class ActionType {
     REPLY_GMAIL,
     SEND_TELEGRAM,
     REPLY_TELEGRAM,
+    AUTO_REPLY_TELEGRAM, // New auto-reply action for Telegram
     FORWARD_GMAIL_TO_TELEGRAM, // Forward Gmail content to Telegram
     AI_ANALYZE,
     AI_SUMMARIZE,
@@ -833,7 +843,8 @@ suspend fun createDynamicWorkflow(
     onSuccess: () -> Unit,
     onError: (Exception) -> Unit,
     editWorkflowId: String? = null, // Add edit mode parameter
-    isEditMode: Boolean = false      // Add edit mode flag
+    isEditMode: Boolean = false,     // Add edit mode flag
+    context: android.content.Context // Add context parameter for geofencing
 ) {
     try {
         android.util.Log.i("WorkflowBuilder", "=== Starting createDynamicWorkflow ===")
@@ -895,6 +906,37 @@ suspend fun createDynamicWorkflow(
         result.fold(
             onSuccess = { 
                 android.util.Log.i("WorkflowBuilder", "Workflow saved successfully!")
+                
+                // Check if this workflow has geofence triggers and refresh geofences if needed
+                val hasLocationTrigger = workflowTrigger is MultiUserTrigger.GeofenceEnterTrigger ||
+                                       workflowTrigger is MultiUserTrigger.GeofenceExitTrigger ||
+                                       workflowTrigger is MultiUserTrigger.GeofenceDwellTrigger
+                
+                if (hasLocationTrigger) {
+                    android.util.Log.i("WorkflowBuilder", "Workflow has location trigger - refreshing geofences...")
+                    try {
+                        val workflowEngine = AppContainer.provideWorkflowEngine(context)
+                        val geofencingService = GeofencingService(context, workflowRepository, workflowEngine)
+                        
+                        // Launch async to refresh geofences
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            geofencingService.refreshGeofences().fold(
+                                onSuccess = { count ->
+                                    android.util.Log.i("WorkflowBuilder", "Geofences refreshed successfully: $count geofences active")
+                                },
+                                onFailure = { error ->
+                                    android.util.Log.e("WorkflowBuilder", "Failed to refresh geofences: ${error.message}")
+                                    android.util.Log.e("WorkflowBuilder", "Running geofencing diagnostic...")
+                                    // Run diagnostic to help troubleshoot the issue
+                                    geofencingService.diagnoseGeofencingStatus()
+                                }
+                            )
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("WorkflowBuilder", "Error setting up geofencing: ${e.message}")
+                    }
+                }
+                
                 onSuccess() 
             },
             onFailure = { error ->
@@ -987,6 +1029,9 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
         ActionType.SEND_TELEGRAM -> MultiUserAction.SendToUserTelegram(
             targetUserId = config.config["targetUserId"] ?: users.firstOrNull()?.id ?: "",
             text = config.config["text"] ?: "Workflow notification"
+        )
+        ActionType.AUTO_REPLY_TELEGRAM -> MultiUserAction.AutoReplyTelegram(
+            autoReplyText = config.config["autoReplyText"] ?: "Thank you for your message! I'll get back to you soon."
         )
         ActionType.FORWARD_GMAIL_TO_TELEGRAM -> MultiUserAction.ForwardGmailToTelegram(
             targetUserId = config.config["targetUserId"] ?: users.firstOrNull()?.id ?: "",
@@ -1657,6 +1702,30 @@ fun ActionPickerDialog(
                                     configFields = listOf(
                                         "targetUserId" to "Target User ID",
                                         "text" to "Message text"
+                                    )
+                                )
+                            }
+                            item {
+                                ActionOptionCard(
+                                    title = "Auto-Reply Telegram",
+                                    description = "Automatically reply to the sender of incoming Telegram messages",
+                                    icon = "🤖",
+                                    onClick = {
+                                        val replyText = actionConfig["autoReplyText"]?.take(30) ?: "auto-reply"
+                                        val displayName = "Auto-reply: \"$replyText\""
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.AUTO_REPLY_TELEGRAM,
+                                            displayName = displayName,
+                                            config = actionConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = actionConfig,
+                                    onConfigChange = { key, value ->
+                                        actionConfig = actionConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "autoReplyText" to "Auto-reply message"
                                     )
                                 )
                             }
@@ -2361,6 +2430,7 @@ fun ActionPreview(
             val icon = when (action.type) {
                 ActionType.SEND_GMAIL, ActionType.REPLY_GMAIL -> "📧"
                 ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM -> "✈️"
+                ActionType.AUTO_REPLY_TELEGRAM -> "🤖"
                 ActionType.FORWARD_GMAIL_TO_TELEGRAM -> "📧➡️✈️"
                 ActionType.AI_ANALYZE -> "🧠"
                 ActionType.AI_SUMMARIZE -> "📝"
@@ -2398,6 +2468,7 @@ fun ActionPreview(
                         ActionType.REPLY_GMAIL -> "Reply to Gmail email"
                         ActionType.SEND_TELEGRAM -> "Send Telegram message"
                         ActionType.REPLY_TELEGRAM -> "Reply to Telegram message"
+                        ActionType.AUTO_REPLY_TELEGRAM -> "Auto-reply to message sender"
                         ActionType.FORWARD_GMAIL_TO_TELEGRAM -> "Forward Gmail content to Telegram"
                         ActionType.AI_ANALYZE -> "Analyze content with AI"
                         ActionType.AI_SUMMARIZE -> "Summarize content with AI"
@@ -2906,6 +2977,21 @@ fun validateAction(action: ActionConfig, inputData: Map<String, String>, users: 
                 )
             }
         }
+        ActionType.AUTO_REPLY_TELEGRAM -> {
+            val autoReplyText = action.config["autoReplyText"]
+            
+            if (autoReplyText.isNullOrBlank()) {
+                ActionValidationResult(
+                    message = "❌ Auto-reply text cannot be empty",
+                    status = WorkflowTestStatus.FAILED
+                )
+            } else {
+                ActionValidationResult(
+                    message = "✓ Will auto-reply \"${autoReplyText.take(50)}${if (autoReplyText.length > 50) "..." else ""}\" to message sender",
+                    status = WorkflowTestStatus.SUCCESS
+                )
+            }
+        }
         ActionType.FORWARD_GMAIL_TO_TELEGRAM -> {
             val targetUserId = action.config["targetUserId"]
             val includeSubject = action.config["includeSubject"]?.toBoolean() ?: true
@@ -3095,7 +3181,7 @@ fun validateWorkflowConnectivity(
     
     // Check if there are cross-user actions but no users selected
     val hasUserTargetedActions = actions.any { action ->
-        action.type == ActionType.SEND_GMAIL || action.type == ActionType.SEND_TELEGRAM
+        action.type == ActionType.SEND_GMAIL || action.type == ActionType.SEND_TELEGRAM || action.type == ActionType.AUTO_REPLY_TELEGRAM
     }
     
     if (hasUserTargetedActions && users.isEmpty()) {
@@ -3150,7 +3236,7 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
     actions.forEach { action ->
         when (action.type) {
             ActionType.SEND_GMAIL, ActionType.REPLY_GMAIL -> platforms.add(WorkflowPlatform.GMAIL)
-            ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM -> platforms.add(WorkflowPlatform.TELEGRAM)
+            ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM, ActionType.AUTO_REPLY_TELEGRAM -> platforms.add(WorkflowPlatform.TELEGRAM)
             ActionType.FORWARD_GMAIL_TO_TELEGRAM -> {
                 platforms.add(WorkflowPlatform.GMAIL)
                 platforms.add(WorkflowPlatform.TELEGRAM)
@@ -3186,7 +3272,7 @@ fun generateTemplateTags(trigger: TriggerConfig, actions: List<ActionConfig>): L
     val hasAI = actions.any { it.type in listOf(ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY) }
     if (hasAI) tags.add("AI")
     
-    val hasCommunication = actions.any { it.type in listOf(ActionType.SEND_GMAIL, ActionType.SEND_TELEGRAM, ActionType.REPLY_GMAIL, ActionType.REPLY_TELEGRAM, ActionType.FORWARD_GMAIL_TO_TELEGRAM) }
+    val hasCommunication = actions.any { it.type in listOf(ActionType.SEND_GMAIL, ActionType.SEND_TELEGRAM, ActionType.REPLY_GMAIL, ActionType.REPLY_TELEGRAM, ActionType.AUTO_REPLY_TELEGRAM, ActionType.FORWARD_GMAIL_TO_TELEGRAM) }
     if (hasCommunication) tags.add("Communication")
     
     val hasDelay = actions.any { it.type == ActionType.DELAY }

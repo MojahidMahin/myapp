@@ -199,7 +199,7 @@ sealed class MultiUserAction {
     
     // Telegram Actions
     data class SendToUserTelegram(
-        val targetUserId: String,
+        val targetUserId: String = "",  // If empty, uses trigger user
         val chatId: Long? = null,  // If null, uses user's private chat
         val text: String,
         val parseMode: String? = null
@@ -217,10 +217,14 @@ sealed class MultiUserAction {
     
     data class ReplyToUserTelegram(
         val targetUserId: String,
-        val chatId: Long,
-        val replyToMessageId: Long,
+        val chatId: Long = 0L,  // Default 0L, will be resolved from context if not provided
+        val replyToMessageId: Long = 0L,  // Default 0L, will be resolved from context if not provided
         val text: String,
         val parseMode: String? = null
+    ) : MultiUserAction()
+    
+    data class AutoReplyTelegram(
+        val autoReplyText: String  // The automatic reply message
     ) : MultiUserAction()
     
     data class ForwardUserTelegram(

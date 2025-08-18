@@ -26,7 +26,8 @@
       "Bash(cd:*)",
       "Bash(cd:*)",
       "Bash(mkdir:*)",
-      "Bash(cp:*)"
+      "Bash(cp:*)",
+      "Bash(gradle:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",

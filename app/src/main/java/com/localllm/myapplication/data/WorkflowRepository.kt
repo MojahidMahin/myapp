@@ -273,8 +273,9 @@ fun InMemoryUserRepository.initializeSampleUsers() {
             id = "user_1",
             email = "user@example.com",
             displayName = "Demo User",
-            telegramUserId = 123456789L,
-            telegramUsername = "demo_user",
+            telegramUserId = null,  // No fake Telegram ID
+            telegramUsername = null,
+            telegramConnected = false,  // Will be set to true when real bot connects
             createdAt = System.currentTimeMillis()
         ),
         WorkflowUser(

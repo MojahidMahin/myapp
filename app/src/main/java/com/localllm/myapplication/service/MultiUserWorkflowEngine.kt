@@ -211,6 +211,7 @@ class MultiUserWorkflowEngine(
                 is MultiUserAction.SendToUserTelegram -> executeSendToUserTelegram(action, context)
                 is MultiUserAction.ForwardGmailToTelegram -> executeForwardGmailToTelegram(action, context)
                 is MultiUserAction.ReplyToUserTelegram -> executeReplyToUserTelegram(action, context)
+                is MultiUserAction.AutoReplyTelegram -> executeAutoReplyTelegram(action, context)
                 is MultiUserAction.ForwardUserTelegram -> executeForwardUserTelegram(action, context)
                 
                 // Multi-user Actions
@@ -327,19 +328,37 @@ class MultiUserWorkflowEngine(
         Log.d(TAG, "💬 Specified Chat ID: ${action.chatId}")
         Log.d(TAG, "🎨 Parse Mode: ${action.parseMode}")
         
-        Log.d(TAG, "🔎 STEP W1: Getting Telegram service for user ${action.targetUserId}")
-        val telegramService = userManager.getTelegramService(action.targetUserId)
+        // STEP 1: Resolve target user ID (handle empty targetUserId by using trigger user)
+        val resolvedTargetUserId = if (action.targetUserId.isBlank()) {
+            Log.w(TAG, "⚠️ Empty targetUserId, using trigger user: ${context.triggerUserId}")
+            context.triggerUserId
+        } else {
+            action.targetUserId
+        }
+        
+        Log.i(TAG, "🔧 SPECIAL HANDLING: For Telegram replies, prioritizing trigger chat over user profile")
+        // If this is a Telegram-triggered workflow, the chat ID should come from the trigger
+        val hasTelegramTriggerData = context.variables.containsKey("telegram_chat_id") || context.variables.containsKey("telegram_user_id")
+        if (hasTelegramTriggerData) {
+            Log.i(TAG, "📱 Telegram trigger detected - will use trigger chat data for reply")
+        }
+        
+        Log.d(TAG, "🔎 STEP W1: Getting Telegram service for user $resolvedTargetUserId")
+        val telegramService = userManager.getTelegramService(resolvedTargetUserId)
         if (telegramService == null) {
-            Log.e(TAG, "❌ STEP W1: Telegram service not available for user ${action.targetUserId}")
-            return Result.failure(Exception("Telegram service not available for user ${action.targetUserId}"))
+            Log.e(TAG, "❌ STEP W1: Telegram service not available for user $resolvedTargetUserId")
+            return Result.failure(Exception(
+                "Telegram service not configured for user $resolvedTargetUserId. " +
+                "Please ensure the Telegram bot is properly connected in the Workflow Manager."
+            ))
         }
         Log.i(TAG, "✅ STEP W1: Telegram service obtained")
         
         Log.d(TAG, "🔎 STEP W2: Getting target user details")
-        val targetUser = userManager.getUserById(action.targetUserId).getOrNull()
+        val targetUser = userManager.getUserById(resolvedTargetUserId).getOrNull()
         if (targetUser == null) {
-            Log.e(TAG, "❌ STEP W2: Target user not found: ${action.targetUserId}")
-            return Result.failure(Exception("Target user not found: ${action.targetUserId}"))
+            Log.e(TAG, "❌ STEP W2: Target user not found: $resolvedTargetUserId")
+            return Result.failure(Exception("Target user not found: $resolvedTargetUserId"))
         }
         
         Log.i(TAG, "✅ STEP W2: Target user found")
@@ -349,137 +368,61 @@ class MultiUserWorkflowEngine(
         Log.d(TAG, "🔗 Telegram Connected: ${targetUser.telegramConnected}")
         Log.d(TAG, "👤 Telegram Username: ${targetUser.telegramUsername}")
         
-        // Determine chat ID with multiple fallback options
+        // STEP 3: Determine target chat ID using real bot data
         Log.d(TAG, "🎯 STEP W3: Determining target chat ID...")
         Log.d(TAG, "📋 Available context variables: ${context.variables.keys}")
         
-        val chatId = when {
-            // 1. Use explicitly specified chat ID
-            action.chatId != null -> {
-                Log.i(TAG, "✅ STEP W3: Using specified chat ID: ${action.chatId}")
-                action.chatId
-            }
-            // 2. Use target user's Telegram ID
-            targetUser.telegramUserId != null -> {
-                Log.i(TAG, "✅ STEP W3: Using target user's Telegram ID: ${targetUser.telegramUserId}")
-                targetUser.telegramUserId
-            }
-            // 3. Fallback: Use source chat ID from trigger data (same chat as the incoming message)
-            context.variables["telegram_chat_id"]?.toLongOrNull() != null -> {
-                val sourceChatId = context.variables["telegram_chat_id"]!!.toLong()
-                Log.w(TAG, "⚠️ STEP W3: Fallback - Using source chat ID for reply: $sourceChatId")
-                Log.w(TAG, "💡 This means the message will be sent to the same chat where it came from")
-                sourceChatId
-            }
-            // 4. Last resort: Try to use source user ID as chat ID
-            context.variables["telegram_user_id"]?.toLongOrNull() != null -> {
-                val sourceUserId = context.variables["telegram_user_id"]!!.toLong()
-                Log.w(TAG, "⚠️ STEP W3: Last resort - Using source user ID as chat ID: $sourceUserId")
-                Log.w(TAG, "💡 This will attempt to send a private message to the original sender")
-                sourceUserId
-            }
-            else -> {
-                Log.e(TAG, "❌ STEP W3: No valid chat ID found!")
-                Log.e(TAG, "📋 Available variables: ${context.variables}")
-                Log.e(TAG, "💡 Solution: Target user needs to connect Telegram or start a chat with the bot")
-                return Result.failure(Exception("No valid Telegram chat ID available. Target user needs to connect Telegram or start a chat with the bot first."))
-            }
+        val chatId = determineChatId(action, targetUser, context)
+        if (chatId == null) {
+            Log.e(TAG, "❌ STEP W3: Could not determine valid chat ID for real Telegram bot")
+            return Result.failure(Exception(
+                "No valid Telegram chat ID found. Possible solutions:\n" +
+                "1. Make sure users have started a conversation with your bot\n" +
+                "2. Check the Telegram tab in Workflow Manager for saved users\n" +
+                "3. Send a test message to your bot first to establish chat"
+            ))
         }
         
+        Log.i(TAG, "✅ STEP W3: Using chat ID: $chatId")
+        
+        // STEP 4: Process message template
         Log.d(TAG, "🔄 STEP W4: Processing message template...")
         Log.d(TAG, "📝 Original template: '${action.text}'")
         val processedText = replaceVariables(action.text, context.variables)
         Log.i(TAG, "✅ STEP W4: Template processed")
         Log.d(TAG, "📝 Final message: '$processedText'")
         
-        // Validate chat access before sending
-        Log.d(TAG, "🔐 STEP W5A: Validating chat access for Chat ID: $chatId")
-        val chatValidation = telegramService.validateChatAccess(chatId)
-        val isChatAccessible = chatValidation.getOrNull() ?: false
-        
-        if (!isChatAccessible) {
-            Log.w(TAG, "⚠️ STEP W5A: Chat $chatId is not accessible, trying fallbacks...")
-            
-            // Try fallback chat IDs
-            val fallbackChatId = when {
-                // Try original sender's chat (for auto-reply)
-                context.variables["telegram_chat_id"]?.toLongOrNull() != null && 
-                context.variables["telegram_chat_id"]?.toLongOrNull() != chatId -> {
-                    val originalChatId = context.variables["telegram_chat_id"]!!.toLong()
-                    Log.w(TAG, "🔄 Trying fallback: Original message chat ID $originalChatId")
-                    originalChatId
-                }
-                // Try sender's user ID as private chat
-                context.variables["telegram_user_id"]?.toLongOrNull() != null && 
-                context.variables["telegram_user_id"]?.toLongOrNull() != chatId -> {
-                    val senderUserId = context.variables["telegram_user_id"]!!.toLong()
-                    Log.w(TAG, "🔄 Trying fallback: Sender user ID $senderUserId")
-                    senderUserId
-                }
-                else -> null
-            }
-            
-            if (fallbackChatId != null) {
-                Log.d(TAG, "🔐 STEP W5B: Validating fallback chat access for $fallbackChatId")
-                val fallbackValidation = telegramService.validateChatAccess(fallbackChatId)
-                if (fallbackValidation.getOrNull() == true) {
-                    Log.i(TAG, "✅ STEP W5B: Using fallback chat ID: $fallbackChatId")
-                    return sendToValidatedChat(telegramService, fallbackChatId, processedText, action.parseMode, targetUser, "fallback chat")
-                } else {
-                    Log.e(TAG, "❌ STEP W5B: Fallback chat $fallbackChatId also not accessible")
-                }
-            }
-            
-            // If all chats fail, return error with helpful message
-            return Result.failure(Exception(
-                "No accessible chat found. Solutions:\n" +
-                "1. Target user (${targetUser.displayName}) needs to start a chat with the bot\n" +
-                "2. Add the bot to the target chat (ID: $chatId)\n" +
-                "3. Ensure the bot has permission to send messages\n" +
-                "4. Check if chat ID $chatId is correct"
-            ))
-        }
-        
-        Log.i(TAG, "✅ STEP W5A: Chat $chatId is accessible")
-        return sendToValidatedChat(telegramService, chatId, processedText, action.parseMode, targetUser, "primary chat")
-    }
-    
-    private suspend fun sendToValidatedChat(
-        telegramService: TelegramBotService,
-        chatId: Long,
-        text: String,
-        parseMode: String?,
-        targetUser: WorkflowUser,
-        chatType: String
-    ): Result<String> {
-        Log.i(TAG, "🚀 STEP W6: Sending message to Telegram ($chatType)...")
+        // STEP 5: Send message via real Telegram bot
+        Log.i(TAG, "🚀 STEP W5: Sending message to Telegram...")
         Log.i(TAG, "🎯 Target Chat ID: $chatId")
-        Log.i(TAG, "📝 Message Length: ${text.length} characters")
+        Log.i(TAG, "📝 Message Length: ${processedText.length} characters")
         
-        return telegramService.sendMessage(chatId, text, parseMode).fold(
+        return telegramService.sendMessage(chatId, processedText, action.parseMode).fold(
             onSuccess = { messageId ->
-                Log.i(TAG, "🎉 STEP W7: Message sent successfully to Telegram!")
+                Log.i(TAG, "🎉 SUCCESS: Message sent to Telegram!")
                 Log.i(TAG, "🆔 Telegram Message ID: $messageId")
-                Log.i(TAG, "🎯 Sent to Chat: $chatId ($chatType)")
+                Log.i(TAG, "🎯 Sent to Chat: $chatId")
                 Log.i(TAG, "👤 Target User: ${targetUser.displayName}")
-                Result.success("Message sent to Telegram: $messageId")
+                Result.success("Message sent to Telegram chat $chatId: Message ID $messageId")
             },
             onFailure = { error ->
-                Log.e(TAG, "❌ STEP W7: Failed to send Telegram message")
+                Log.e(TAG, "❌ FAILED: Could not send Telegram message")
                 Log.e(TAG, "💥 Error type: ${error.javaClass.simpleName}")
                 Log.e(TAG, "💬 Error message: ${error.message}")
-                Log.e(TAG, "🎯 Failed Chat ID: $chatId ($chatType)")
+                Log.e(TAG, "🎯 Failed Chat ID: $chatId")
                 Log.e(TAG, "👤 Target User: ${targetUser.displayName}")
                 
                 // Provide specific error guidance
                 val errorMessage = when {
                     error.message?.contains("chat not found") == true -> 
-                        "Chat $chatId not found. User needs to start a conversation with the bot first."
+                        "Chat $chatId not found. The user needs to start a conversation with your bot first. Go to Telegram and send any message to your bot."
                     error.message?.contains("bot was blocked") == true -> 
-                        "Bot was blocked by user in chat $chatId."
+                        "Bot was blocked by user in chat $chatId. The user needs to unblock your bot."
                     error.message?.contains("not enough rights") == true -> 
-                        "Bot doesn't have permission to send messages in chat $chatId."
-                    else -> "Failed to send message: ${error.message}"
+                        "Bot doesn't have permission to send messages in chat $chatId. Check bot permissions."
+                    error.message?.contains("Bad Request") == true ->
+                        "Invalid request. The chat ID $chatId may not exist or the bot doesn't have access to it."
+                    else -> "Failed to send message to chat $chatId: ${error.message}"
                 }
                 
                 Result.failure(Exception(errorMessage))
@@ -487,15 +430,199 @@ class MultiUserWorkflowEngine(
         )
     }
     
+    /**
+     * Determine chat ID for real Telegram bot usage
+     */
+    private suspend fun determineChatId(action: MultiUserAction.SendToUserTelegram, targetUser: WorkflowUser, context: WorkflowExecutionContext): Long? {
+        Log.d(TAG, "🔍 Determining chat ID with priority order:")
+        Log.d(TAG, "   1. Specified chat ID: ${action.chatId}")
+        Log.d(TAG, "   2. Trigger chat ID: ${context.variables["telegram_chat_id"]}")
+        Log.d(TAG, "   3. Trigger user ID: ${context.variables["telegram_user_id"]}")
+        Log.d(TAG, "   4. Target user Telegram ID: ${targetUser.telegramUserId}")
+        
+        return when {
+            // 1. Use explicitly specified chat ID
+            action.chatId != null -> {
+                Log.i(TAG, "✅ Using specified chat ID: ${action.chatId}")
+                action.chatId
+            }
+            // 2. Use chat ID from trigger context (HIGHEST PRIORITY for replies)
+            context.variables["telegram_chat_id"]?.toLongOrNull() != null -> {
+                val chatId = context.variables["telegram_chat_id"]!!.toLong()
+                Log.i(TAG, "✅ Using trigger chat ID (reply to same chat): $chatId")
+                chatId
+            }
+            // 3. Use user ID from trigger context (for private messages)
+            context.variables["telegram_user_id"]?.toLongOrNull() != null -> {
+                val userId = context.variables["telegram_user_id"]!!.toLong()
+                Log.i(TAG, "✅ Using trigger user ID as chat ID: $userId")
+                userId
+            }
+            // 4. Use target user's Telegram ID (if they have connected Telegram)
+            targetUser.telegramUserId != null -> {
+                Log.i(TAG, "✅ Using target user's Telegram ID: ${targetUser.telegramUserId}")
+                targetUser.telegramUserId
+            }
+            // 5. Try to get chat ID from saved Telegram users
+            else -> {
+                Log.w(TAG, "⚠️ No direct chat ID found, checking saved Telegram users...")
+                val savedUsers = getSavedTelegramUsers()
+                if (savedUsers.isNotEmpty()) {
+                    val firstUser = savedUsers.values.first()
+                    Log.i(TAG, "✅ Using saved Telegram user chat ID: ${firstUser.id}")
+                    firstUser.id
+                } else {
+                    Log.w(TAG, "⚠️ No saved Telegram users found")
+                    Log.w(TAG, "💡 To fix this: Go to Telegram → send any message to your bot → try workflow again")
+                    null
+                }
+            }
+        }
+    }
+    
+    /**
+     * Get saved Telegram users from preferences
+     */
+    private fun getSavedTelegramUsers(): Map<Long, TelegramUser> {
+        return try {
+            val telegramPrefs = TelegramPreferences(context)
+            telegramPrefs.getSavedUsers()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get saved Telegram users", e)
+            emptyMap()
+        }
+    }
+    
+    /**
+     * Resolve chat ID for Telegram reply - can use trigger context or specified value
+     */
+    private suspend fun resolveReplyContext(action: MultiUserAction.ReplyToUserTelegram, context: WorkflowExecutionContext): Long? {
+        Log.d(TAG, "🔍 Resolving reply chat ID:")
+        Log.d(TAG, "   1. Action chat ID: ${action.chatId}")
+        Log.d(TAG, "   2. Trigger chat ID: ${context.variables["telegram_chat_id"]}")
+        
+        return when {
+            // 1. Use explicitly specified chat ID (highest priority)
+            action.chatId != 0L -> {
+                Log.i(TAG, "✅ Using action chat ID: ${action.chatId}")
+                action.chatId
+            }
+            // 2. Use chat ID from trigger context (for auto-replies)
+            context.variables["telegram_chat_id"]?.toLongOrNull() != null -> {
+                val chatId = context.variables["telegram_chat_id"]!!.toLong()
+                Log.i(TAG, "✅ Using trigger chat ID: $chatId")
+                chatId
+            }
+            // 3. Use user ID from trigger context as chat ID
+            context.variables["telegram_user_id"]?.toLongOrNull() != null -> {
+                val userId = context.variables["telegram_user_id"]!!.toLong()
+                Log.i(TAG, "✅ Using trigger user ID as chat: $userId")
+                userId
+            }
+            // 4. No valid chat ID found
+            else -> {
+                Log.w(TAG, "⚠️ No valid chat ID found for reply")
+                null
+            }
+        }
+    }
+    
+    /**
+     * Resolve message ID to reply to - can use trigger context or specified value
+     */
+    private suspend fun resolveReplyMessageId(action: MultiUserAction.ReplyToUserTelegram, context: WorkflowExecutionContext): Long? {
+        Log.d(TAG, "🔍 Resolving reply message ID:")
+        Log.d(TAG, "   1. Action message ID: ${action.replyToMessageId}")
+        Log.d(TAG, "   2. Trigger message ID: ${context.variables["telegram_message_id"]}")
+        
+        return when {
+            // 1. Use explicitly specified message ID (highest priority)
+            action.replyToMessageId != 0L -> {
+                Log.i(TAG, "✅ Using action message ID: ${action.replyToMessageId}")
+                action.replyToMessageId
+            }
+            // 2. Use message ID from trigger context (for auto-replies)
+            context.variables["telegram_message_id"]?.toLongOrNull() != null -> {
+                val messageId = context.variables["telegram_message_id"]!!.toLong()
+                Log.i(TAG, "✅ Using trigger message ID: $messageId")
+                messageId
+            }
+            // 3. No valid message ID found
+            else -> {
+                Log.w(TAG, "⚠️ No valid message ID found for reply")
+                null
+            }
+        }
+    }
+    
+    /**
+     * Determine chat ID for Gmail forwarding (different from Telegram replies)
+     */
+    private suspend fun determineGmailForwardChatId(action: MultiUserAction.ForwardGmailToTelegram, targetUser: WorkflowUser, context: WorkflowExecutionContext): Long? {
+        Log.d(TAG, "🔍 Determining chat ID for Gmail forwarding:")
+        Log.d(TAG, "   1. Specified chat ID: ${action.chatId}")
+        Log.d(TAG, "   2. Target user Telegram ID: ${targetUser.telegramUserId}")
+        Log.d(TAG, "   3. Target user connected: ${targetUser.telegramConnected}")
+        
+        return when {
+            // 1. Use explicitly specified chat ID
+            action.chatId != null -> {
+                Log.i(TAG, "✅ Using specified chat ID: ${action.chatId}")
+                action.chatId
+            }
+            // 2. Use target user's Telegram ID (if they have connected)
+            targetUser.telegramUserId != null -> {
+                Log.i(TAG, "✅ Using target user's Telegram ID: ${targetUser.telegramUserId}")
+                targetUser.telegramUserId
+            }
+            // 3. Use first available saved Telegram user (most common case for Gmail forwarding)
+            else -> {
+                Log.w(TAG, "⚠️ No specific target, using saved Telegram users from bot interactions...")
+                val savedUsers = getSavedTelegramUsers()
+                Log.d(TAG, "📊 Found ${savedUsers.size} saved Telegram users")
+                
+                if (savedUsers.isNotEmpty()) {
+                    val firstUser = savedUsers.values.first()
+                    Log.i(TAG, "✅ Using first saved Telegram user: ${firstUser.firstName} ${firstUser.lastName} (ID: ${firstUser.id})")
+                    Log.i(TAG, "   👤 Username: @${firstUser.username ?: "N/A"}")
+                    firstUser.id
+                } else {
+                    Log.w(TAG, "⚠️ No saved Telegram users found")
+                    Log.w(TAG, "💡 To fix: Go to your Telegram bot → send any message → check Workflow Manager > Telegram tab")
+                    null
+                }
+            }
+        }
+    }
+    
+    
     private suspend fun executeForwardGmailToTelegram(action: MultiUserAction.ForwardGmailToTelegram, context: WorkflowExecutionContext): Result<String> {
+        Log.i(TAG, "📧➡️✈️ === EXECUTING FORWARD GMAIL TO TELEGRAM ===")
+        Log.i(TAG, "🎯 Target User ID: ${action.targetUserId}")
+        
         val telegramService = userManager.getTelegramService(action.targetUserId)
-            ?: return Result.failure(Exception("Telegram service not available for user"))
+        if (telegramService == null) {
+            return Result.failure(Exception(
+                "Telegram service not available for user ${action.targetUserId}. " +
+                "Please ensure the Telegram bot is properly connected in the Workflow Manager."
+            ))
+        }
         
         val targetUser = userManager.getUserById(action.targetUserId).getOrNull()
             ?: return Result.failure(Exception("Target user not found"))
         
-        val chatId = action.chatId ?: targetUser.telegramUserId
-            ?: return Result.failure(Exception("No Telegram chat ID available for user"))
+        // Determine chat ID for Gmail forwarding (different logic than Telegram replies)
+        val chatId = determineGmailForwardChatId(action, targetUser, context)
+        if (chatId == null) {
+            return Result.failure(Exception(
+                "No Telegram chat ID available for Gmail forwarding. Please ensure:\n" +
+                "1. Someone has sent a message to your bot (check Telegram tab in Workflow Manager)\n" +
+                "2. Or specify a target user who has connected their Telegram account\n" +
+                "3. Or set a specific chat ID in the workflow action"
+            ))
+        }
+        
+        Log.i(TAG, "✅ Using chat ID for Gmail forward: $chatId")
         
         // Build the message content from Gmail data
         val messageBuilder = StringBuilder()
@@ -557,20 +684,193 @@ class MultiUserWorkflowEngine(
         
         val finalMessage = messageBuilder.toString().trim()
         
+        Log.i(TAG, "📝 Gmail forward message preview: ${finalMessage.take(100)}...")
+        Log.i(TAG, "📊 Message length: ${finalMessage.length} characters")
+        
         // Send to Telegram with Markdown formatting
-        return telegramService.sendMessage(chatId, finalMessage, "Markdown").map { messageId ->
-            "Gmail content forwarded to Telegram: $messageId"
-        }
+        return telegramService.sendMessage(chatId, finalMessage, "Markdown").fold(
+            onSuccess = { messageId ->
+                Log.i(TAG, "🎉 SUCCESS: Gmail forwarded to Telegram!")
+                Log.i(TAG, "🆔 Telegram Message ID: $messageId")
+                Log.i(TAG, "🎯 Sent to Chat: $chatId")
+                Log.i(TAG, "📧 Original email from: ${context.variables["email_from"]}")
+                Log.i(TAG, "📝 Subject: ${context.variables["email_subject"]}")
+                Result.success("Gmail content forwarded to Telegram chat $chatId: Message ID $messageId")
+            },
+            onFailure = { error ->
+                Log.e(TAG, "❌ FAILED: Could not forward Gmail to Telegram")
+                Log.e(TAG, "💥 Error type: ${error.javaClass.simpleName}")
+                Log.e(TAG, "💬 Error message: ${error.message}")
+                Log.e(TAG, "🎯 Failed Chat ID: $chatId")
+                Log.e(TAG, "📧 Email from: ${context.variables["email_from"]}")
+                
+                // Provide specific error guidance
+                val errorMessage = when {
+                    error.message?.contains("chat not found") == true -> 
+                        "Chat $chatId not found. The user needs to start a conversation with your bot first."
+                    error.message?.contains("bot was blocked") == true -> 
+                        "Bot was blocked by user in chat $chatId."
+                    error.message?.contains("not enough rights") == true -> 
+                        "Bot doesn't have permission to send messages in chat $chatId."
+                    error.message?.contains("Bad Request") == true ->
+                        "Invalid request. The chat ID $chatId may not exist or be accessible."
+                    else -> "Failed to forward Gmail to chat $chatId: ${error.message}"
+                }
+                
+                Result.failure(Exception(errorMessage))
+            }
+        )
     }
     
     private suspend fun executeReplyToUserTelegram(action: MultiUserAction.ReplyToUserTelegram, context: WorkflowExecutionContext): Result<String> {
-        val telegramService = userManager.getTelegramService(action.targetUserId)
-            ?: return Result.failure(Exception("Telegram service not available for user"))
+        Log.i(TAG, "💬 === EXECUTING REPLY TO TELEGRAM MESSAGE ===")
+        Log.i(TAG, "🎯 Target User ID: ${action.targetUserId}")
+        Log.i(TAG, "🎯 Chat ID: ${action.chatId}")
+        Log.i(TAG, "📝 Reply to Message ID: ${action.replyToMessageId}")
         
+        // STEP 1: Resolve target user ID if empty
+        val resolvedTargetUserId = if (action.targetUserId.isBlank()) {
+            Log.w(TAG, "⚠️ Empty targetUserId, using trigger user: ${context.triggerUserId}")
+            context.triggerUserId
+        } else {
+            action.targetUserId
+        }
+        
+        // STEP 2: Get Telegram service
+        val telegramService = userManager.getTelegramService(resolvedTargetUserId)
+        if (telegramService == null) {
+            return Result.failure(Exception(
+                "Telegram service not available for user $resolvedTargetUserId. " +
+                "Please ensure the Telegram bot is properly connected in the Workflow Manager."
+            ))
+        }
+        
+        // STEP 3: Resolve chat ID and message ID from context if needed
+        val effectiveChatId = resolveReplyContext(action, context)
+        val effectiveMessageId = resolveReplyMessageId(action, context)
+        
+        if (effectiveChatId == null) {
+            return Result.failure(Exception(
+                "No valid chat ID for Telegram reply. Please ensure:\n" +
+                "1. The chat ID is specified in the action, or\n" +
+                "2. This workflow is triggered by a Telegram message, or\n" +
+                "3. A target user has connected their Telegram account"
+            ))
+        }
+        
+        if (effectiveMessageId == null) {
+            return Result.failure(Exception(
+                "No valid message ID to reply to. Please ensure:\n" +
+                "1. The message ID is specified in the action, or\n" +
+                "2. This workflow is triggered by a Telegram message"
+            ))
+        }
+        
+        Log.i(TAG, "✅ Using effective chat ID: $effectiveChatId")
+        Log.i(TAG, "✅ Using effective message ID: $effectiveMessageId")
+        
+        // STEP 4: Process message text
         val processedText = replaceVariables(action.text, context.variables)
+        Log.d(TAG, "📝 Reply text: '$processedText'")
+        Log.d(TAG, "📊 Text length: ${processedText.length} characters")
         
-        return telegramService.replyToMessage(action.chatId, action.replyToMessageId, processedText, action.parseMode).map { messageId ->
-            "Reply sent to Telegram: $messageId"
+        // STEP 5: Send reply to Telegram
+        Log.i(TAG, "🚀 Sending reply to Telegram...")
+        return telegramService.replyToMessage(effectiveChatId, effectiveMessageId, processedText, action.parseMode).fold(
+            onSuccess = { messageId ->
+                Log.i(TAG, "🎉 SUCCESS: Reply sent to Telegram!")
+                Log.i(TAG, "🆔 New Message ID: $messageId")
+                Log.i(TAG, "🎯 Replied in Chat: $effectiveChatId")
+                Log.i(TAG, "💬 Replied to Message: $effectiveMessageId")
+                Result.success("Reply sent to Telegram chat $effectiveChatId: Message ID $messageId")
+            },
+            onFailure = { error ->
+                Log.e(TAG, "❌ FAILED: Could not send Telegram reply")
+                Log.e(TAG, "💥 Error type: ${error.javaClass.simpleName}")
+                Log.e(TAG, "💬 Error message: ${error.message}")
+                Log.e(TAG, "🎯 Failed Chat ID: $effectiveChatId")
+                Log.e(TAG, "💬 Failed Message ID: $effectiveMessageId")
+                
+                // Provide specific error guidance
+                val errorMessage = when {
+                    error.message?.contains("chat not found") == true -> 
+                        "Chat $effectiveChatId not found. The user needs to start a conversation with your bot first."
+                    error.message?.contains("message to reply not found") == true ->
+                        "Message $effectiveMessageId not found in chat $effectiveChatId. The message may have been deleted."
+                    error.message?.contains("bot was blocked") == true -> 
+                        "Bot was blocked by user in chat $effectiveChatId."
+                    error.message?.contains("not enough rights") == true -> 
+                        "Bot doesn't have permission to send messages in chat $effectiveChatId."
+                    error.message?.contains("Bad Request") == true ->
+                        "Invalid request. Check chat ID ($effectiveChatId) and message ID ($effectiveMessageId)."
+                    else -> "Failed to send reply to chat $effectiveChatId: ${error.message}"
+                }
+                
+                Result.failure(Exception(errorMessage))
+            }
+        )
+    }
+    
+    private suspend fun executeAutoReplyTelegram(action: MultiUserAction.AutoReplyTelegram, context: WorkflowExecutionContext): Result<String> {
+        Log.i(TAG, "🤖 === EXECUTING AUTO-REPLY TELEGRAM ACTION ===")
+        Log.d(TAG, "💬 Auto-reply Text: '${action.autoReplyText}'")
+        
+        // STEP 1: Get Telegram service for auto-reply (use the bot that received the message)
+        val botUserId = context.triggerUserId
+        val telegramService = userManager.getTelegramService(botUserId)
+        if (telegramService == null) {
+            Log.e(TAG, "❌ No Telegram service available for bot user: $botUserId")
+            return Result.failure(Exception("No Telegram service available for bot user $botUserId"))
+        }
+        Log.i(TAG, "✅ Telegram service found for bot user: $botUserId")
+        
+        // STEP 2: Extract trigger information for filtering and auto-reply target
+        val triggerMessageText = context.variables["message_text"] ?: context.variables["trigger_content"] ?: ""
+        val triggerChatId = context.variables["telegram_chat_id"]?.toLongOrNull() ?: 0L
+        val triggerMessageId = context.variables["telegram_message_id"]?.toLongOrNull() ?: 0L
+        val triggerChatType = context.variables["chat_type"] ?: "private"
+        
+        Log.d(TAG, "📨 Trigger Message Text: '$triggerMessageText'")
+        Log.d(TAG, "💬 Trigger Chat ID (auto-reply target): $triggerChatId")
+        Log.d(TAG, "🆔 Trigger Message ID: $triggerMessageId")
+        Log.d(TAG, "🏷️ Trigger Chat Type: '$triggerChatType'")
+        Log.i(TAG, "🎯 Auto-reply will be sent to the message sender in chat: $triggerChatId")
+        
+        // STEP 3: Process auto-reply text
+        val processedText = replaceVariables(action.autoReplyText, context.variables)
+        Log.d(TAG, "📝 Processed auto-reply text: '$processedText'")
+        
+        // STEP 4: Send auto-reply to the message sender (always as reply if possible)
+        return if (triggerMessageId > 0) {
+            // Reply to the original message
+            Log.i(TAG, "↩️ Sending auto-reply as reply to message $triggerMessageId")
+            telegramService.replyToMessage(triggerChatId, triggerMessageId, processedText, null).fold(
+                onSuccess = { messageId ->
+                    Log.i(TAG, "🎉 SUCCESS: Auto-reply sent as reply!")
+                    Log.i(TAG, "🆔 New Message ID: $messageId")
+                    Result.success("Auto-reply sent as reply to message $triggerMessageId in chat $triggerChatId")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "❌ FAILED: Could not send auto-reply as reply")
+                    Log.e(TAG, "💥 Error: ${error.message}")
+                    Result.failure(Exception("Failed to send auto-reply as reply: ${error.message}"))
+                }
+            )
+        } else {
+            // Send as new message if no message ID available
+            Log.i(TAG, "📤 Sending auto-reply as new message")
+            telegramService.sendMessage(triggerChatId, processedText, null).fold(
+                onSuccess = { messageId ->
+                    Log.i(TAG, "🎉 SUCCESS: Auto-reply sent as new message!")
+                    Log.i(TAG, "🆔 New Message ID: $messageId")
+                    Result.success("Auto-reply sent as new message to chat $triggerChatId")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "❌ FAILED: Could not send auto-reply as new message")
+                    Log.e(TAG, "💥 Error: ${error.message}")
+                    Result.failure(Exception("Failed to send auto-reply as new message: ${error.message}"))
+                }
+            )
         }
     }
     

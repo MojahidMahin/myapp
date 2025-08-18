@@ -452,6 +452,19 @@ class WorkflowValidator(private val context: Context) {
                     }
                 }
                 
+                is MultiUserAction.AutoReplyTelegram -> {
+                    // Validate auto-reply text
+                    if (action.autoReplyText.isBlank()) {
+                        errors.add(
+                            ValidationError(
+                                "EMPTY_AUTO_REPLY_TEXT",
+                                "Auto-reply Telegram action at index $index has empty auto-reply text",
+                                suggestedFix = "Provide auto-reply message text"
+                            )
+                        )
+                    }
+                }
+                
                 is MultiUserAction.ForwardGmailToTelegram -> {
                     // Validate user existence
                     val user = userManager.getUserById(action.targetUserId).getOrNull()
@@ -570,6 +583,7 @@ class WorkflowValidator(private val context: Context) {
                 // Add missing action types
                 is MultiUserAction.ForwardUserGmail,
                 is MultiUserAction.ReplyToUserTelegram,
+                is MultiUserAction.AutoReplyTelegram,
                 is MultiUserAction.ForwardUserTelegram,
                 is MultiUserAction.SendToMultipleUsers,
                 is MultiUserAction.BroadcastMessage,
@@ -640,6 +654,9 @@ class WorkflowValidator(private val context: Context) {
                 }
                 is MultiUserAction.SendToUserTelegram -> {
                     extractVariables(action.text, usedVariables)
+                }
+                is MultiUserAction.AutoReplyTelegram -> {
+                    extractVariables(action.autoReplyText, usedVariables)
                 }
                 is MultiUserAction.ForwardGmailToTelegram -> {
                     action.messageTemplate?.let { extractVariables(it, usedVariables) }
@@ -777,6 +794,7 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.SendToUserTelegram,
                 is MultiUserAction.ForwardGmailToTelegram,
                 is MultiUserAction.ReplyToUserTelegram,
+                is MultiUserAction.AutoReplyTelegram,
                 is MultiUserAction.ForwardUserTelegram,
                 is MultiUserAction.SendToMultipleUsers,
                 is MultiUserAction.BroadcastMessage,

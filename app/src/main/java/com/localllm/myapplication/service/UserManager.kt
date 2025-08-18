@@ -103,7 +103,13 @@ class UserManager(private val context: Context) {
      * Get current user ID
      */
     fun getCurrentUserId(): String? {
-        return _currentUser.value?.id ?: "user_1" // Default user ID for demo
+        val currentUserId = _currentUser.value?.id
+        if (currentUserId == null) {
+            // Initialize demo user if no user is signed in
+            Log.w(TAG, "No current user, returning default demo user ID")
+            return "user_1"
+        }
+        return currentUserId
     }
     
     fun signOut() {
@@ -122,6 +128,10 @@ class UserManager(private val context: Context) {
             id = "user_1",
             email = "demo@example.com",
             displayName = "Demo User",
+            telegramUserId = null, // No demo Telegram ID to avoid "chat not found" errors
+            telegramUsername = null,
+            telegramConnected = false, // Set to false to trigger simulation mode
+            gmailConnected = true,
             createdAt = System.currentTimeMillis(),
             permissions = setOf(
                 Permission.CREATE_WORKFLOW,
@@ -136,9 +146,46 @@ class UserManager(private val context: Context) {
             userRepository.createUser(demoUser)
             _currentUser.value = demoUser
             Log.d(TAG, "Demo user initialized: ${demoUser.email}")
+            
+            // Initialize demo services for testing
+            initializeDemoServices(demoUser)
+            
         } catch (e: Exception) {
             Log.w(TAG, "Demo user already exists or error occurred", e)
             _currentUser.value = demoUser
+            
+            // Still try to initialize services
+            initializeDemoServices(demoUser)
+        }
+    }
+    
+    /**
+     * Initialize services for workflows if available
+     */
+    private fun initializeDemoServices(user: WorkflowUser) {
+        try {
+            // Initialize Gmail service if not already present
+            if (!gmailServices.containsKey(user.id)) {
+                val gmailService = GmailIntegrationService(context)
+                gmailServices[user.id] = gmailService
+                Log.d(TAG, "Gmail service initialized for user: ${user.id}")
+            }
+            
+            // Initialize Telegram service only if bot token is available
+            if (!telegramServices.containsKey(user.id)) {
+                val telegramPrefs = TelegramPreferences(context)
+                val savedToken = telegramPrefs.getBotToken()
+                if (!savedToken.isNullOrBlank()) {
+                    val telegramService = TelegramBotService(context)
+                    telegramServices[user.id] = telegramService
+                    Log.d(TAG, "Telegram service initialized for user: ${user.id} with saved bot token")
+                } else {
+                    Log.d(TAG, "No Telegram bot token available for user: ${user.id}")
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to initialize services", e)
         }
     }
     
@@ -324,13 +371,26 @@ class UserManager(private val context: Context) {
      * Get Telegram service for a user
      */
     fun getTelegramService(userId: String): TelegramBotService? {
-        // Return existing service or create a mock one for demo
-        return telegramServices[userId] ?: run {
-            val service = TelegramBotService(context)
-            telegramServices[userId] = service
-            Log.d(TAG, "Created Telegram service for user: $userId")
-            service
+        // Return existing service only - don't create mock services
+        val existingService = telegramServices[userId]
+        if (existingService != null) {
+            Log.d(TAG, "Retrieved existing Telegram service for user: $userId")
+            return existingService
         }
+        
+        // Try to initialize from saved bot token
+        val telegramPrefs = TelegramPreferences(context)
+        val savedToken = telegramPrefs.getBotToken()
+        if (!savedToken.isNullOrBlank()) {
+            Log.d(TAG, "Found saved bot token, initializing Telegram service for user: $userId")
+            val service = TelegramBotService(context)
+            // The service should already be initialized with the saved token
+            telegramServices[userId] = service
+            return service
+        }
+        
+        Log.w(TAG, "No Telegram service available for user: $userId")
+        return null
     }
     
     /**
