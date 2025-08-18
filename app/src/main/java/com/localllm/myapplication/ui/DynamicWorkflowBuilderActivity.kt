@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.ui.window.Dialog
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +35,117 @@ import com.localllm.myapplication.ui.theme.MyApplicationTheme
 import com.localllm.myapplication.ui.theme.*
 import kotlinx.coroutines.launch
 import java.util.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SimpleTelegramContactPicker(
+    selectedContactId: Long?,
+    onContactSelected: (Long, String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    var telegramUsers by remember { mutableStateOf<Map<Long, com.localllm.myapplication.data.TelegramUser>>(emptyMap()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var showDropdown by remember { mutableStateOf(false) }
+    var selectedContact by remember { mutableStateOf<com.localllm.myapplication.data.TelegramUser?>(null) }
+    
+    // Load Telegram contacts from preferences
+    LaunchedEffect(Unit) {
+        scope.launch {
+            try {
+                val telegramPrefs = com.localllm.myapplication.data.TelegramPreferences(context)
+                telegramUsers = telegramPrefs.getSavedUsers()
+                
+                // Set selected contact if ID is provided
+                selectedContactId?.let { id ->
+                    selectedContact = telegramUsers[id]
+                }
+                
+                isLoading = false
+            } catch (e: Exception) {
+                android.util.Log.e("SimpleTelegramContactPicker", "Failed to load Telegram contacts", e)
+                isLoading = false
+            }
+        }
+    }
+    
+    ExposedDropdownMenuBox(
+        expanded = showDropdown,
+        onExpandedChange = { showDropdown = !showDropdown },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = selectedContact?.displayName ?: if (selectedContactId != null) "Contact ID: $selectedContactId" else "",
+            onValueChange = { },
+            readOnly = true,
+            label = { Text(label) },
+            placeholder = { Text("Select a Telegram contact") },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = showDropdown)
+            },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+        )
+        
+        ExposedDropdownMenu(
+            expanded = showDropdown,
+            onDismissRequest = { showDropdown = false }
+        ) {
+            if (isLoading) {
+                DropdownMenuItem(
+                    text = { Text("Loading...") },
+                    onClick = { },
+                    enabled = false
+                )
+            } else if (telegramUsers.isEmpty()) {
+                DropdownMenuItem(
+                    text = { Text("No Telegram contacts found") },
+                    onClick = { },
+                    enabled = false
+                )
+                DropdownMenuItem(
+                    text = { Text("💡 Go to Telegram tab to add contacts") },
+                    onClick = { },
+                    enabled = false
+                )
+            } else {
+                telegramUsers.values.forEach { user ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text = user.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                if (user.username != null) {
+                                    Text(
+                                        text = "@${user.username}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        onClick = {
+                            selectedContact = user
+                            onContactSelected(user.id, user.displayName)
+                            showDropdown = false
+                        },
+                        leadingIcon = {
+                            Text("👤", style = MaterialTheme.typography.titleMedium)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
 
 /**
  * Fully dynamic workflow builder that allows users to create any workflow combination
@@ -191,6 +303,15 @@ fun DynamicWorkflowBuilderScreen(
                                             "includeBody" to action.includeBody.toString(),
                                             "summarize" to action.summarize.toString(),
                                             "messageTemplate" to (action.messageTemplate ?: "")
+                                        )
+                                    )
+                                    is MultiUserAction.GmailAISummaryToTelegram -> ActionConfig(
+                                        type = ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM,
+                                        displayName = "Gmail AI Summary to Telegram",
+                                        config = mapOf(
+                                            "selectedContactId" to action.selectedContactId.toString(),
+                                            "maxSummaryWords" to action.maxSummaryWords.toString(),
+                                            "outputSummaryVariable" to action.outputSummaryVariable
                                         )
                                     )
                                     is MultiUserAction.ReplyToUserGmail -> ActionConfig(
@@ -807,6 +928,7 @@ enum class ActionType {
     REPLY_TELEGRAM,
     AUTO_REPLY_TELEGRAM, // New auto-reply action for Telegram
     FORWARD_GMAIL_TO_TELEGRAM, // Forward Gmail content to Telegram
+    GMAIL_AI_SUMMARY_TO_TELEGRAM, // AI-powered Gmail summary to Telegram with real bot token
     AI_ANALYZE,
     AI_SUMMARIZE,
     AI_TRANSLATE,
@@ -1040,6 +1162,11 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
             includeBody = config.config["includeBody"]?.toBoolean() ?: true,
             summarize = config.config["summarize"]?.toBoolean() ?: false,
             messageTemplate = config.config["messageTemplate"]
+        )
+        ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM -> MultiUserAction.GmailAISummaryToTelegram(
+            selectedContactId = config.config["selectedContactId"]?.toLongOrNull() ?: 0L,
+            maxSummaryWords = config.config["maxSummaryWords"]?.toIntOrNull() ?: 100,
+            outputSummaryVariable = config.config["outputSummaryVariable"] ?: "gmail_ai_summary"
         )
         ActionType.AI_ANALYZE -> MultiUserAction.AIAnalyzeText(
             inputText = config.config["inputText"] ?: "{{trigger_content}}",
@@ -1764,6 +1891,36 @@ fun ActionPickerDialog(
                             }
                             item {
                                 ActionOptionCard(
+                                    title = "Gmail AI Summary to Telegram",
+                                    description = "AI-powered email summaries sent to your Telegram contacts using your bot",
+                                    icon = "📧🤖✈️",
+                                    onClick = {
+                                        val contactName = actionConfig["contactName"] ?: ""
+                                        val maxWords = actionConfig["maxSummaryWords"] ?: "100"
+                                        val displayName = if (contactName.isNotEmpty()) {
+                                            "AI Summary → $contactName (${maxWords}w)"
+                                        } else {
+                                            "Gmail AI Summary to Telegram"
+                                        }
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM,
+                                            displayName = displayName,
+                                            config = actionConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = actionConfig,
+                                    onConfigChange = { key, value ->
+                                        actionConfig = actionConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "selectedContactId" to "💬 Select Telegram Contact",
+                                        "maxSummaryWords" to "📏 Max Summary Words (default: 100)"
+                                    )
+                                )
+                            }
+                            item {
+                                ActionOptionCard(
                                     title = "Reply to Telegram",
                                     description = "Reply to the original Telegram message",
                                     icon = "💬",
@@ -2049,6 +2206,17 @@ fun ActionOptionCard(
                                 onConfigChange?.invoke("contactName", contactName)
                             },
                             label = "Select Telegram Contact",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else if (key == "selectedContactId") {
+                        // Use simplified Telegram contact picker for AI Summary action
+                        SimpleTelegramContactPicker(
+                            selectedContactId = currentConfig[key]?.toLongOrNull(),
+                            onContactSelected = { contactId, contactName ->
+                                onConfigChange?.invoke(key, contactId.toString())
+                                onConfigChange?.invoke("contactName", contactName)
+                            },
+                            label = label,
                             modifier = Modifier.fillMaxWidth()
                         )
                     } else if (key == "body" || key == "text") {
@@ -2432,6 +2600,7 @@ fun ActionPreview(
                 ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM -> "✈️"
                 ActionType.AUTO_REPLY_TELEGRAM -> "🤖"
                 ActionType.FORWARD_GMAIL_TO_TELEGRAM -> "📧➡️✈️"
+                ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM -> "📧🤖✈️"
                 ActionType.AI_ANALYZE -> "🧠"
                 ActionType.AI_SUMMARIZE -> "📝"
                 ActionType.AI_TRANSLATE -> "🌐"
@@ -2470,6 +2639,7 @@ fun ActionPreview(
                         ActionType.REPLY_TELEGRAM -> "Reply to Telegram message"
                         ActionType.AUTO_REPLY_TELEGRAM -> "Auto-reply to message sender"
                         ActionType.FORWARD_GMAIL_TO_TELEGRAM -> "Forward Gmail content to Telegram"
+                        ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM -> "AI-summarize Gmail and send to Telegram"
                         ActionType.AI_ANALYZE -> "Analyze content with AI"
                         ActionType.AI_SUMMARIZE -> "Summarize content with AI"
                         ActionType.AI_TRANSLATE -> "Translate text with AI"
@@ -3016,6 +3186,39 @@ fun validateAction(action: ActionConfig, inputData: Map<String, String>, users: 
                 )
             }
         }
+        ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM -> {
+            val contactId = action.config["selectedContactId"]?.toLongOrNull()
+            val maxWords = action.config["maxSummaryWords"]?.toIntOrNull() ?: 100
+            val contactName = action.config["contactName"] ?: ""
+            
+            when {
+                contactId == null || contactId == 0L -> ActionValidationResult(
+                    message = "❌ Please select a Telegram contact",
+                    status = WorkflowTestStatus.FAILED
+                )
+                maxWords <= 0 -> ActionValidationResult(
+                    message = "❌ Summary word limit must be greater than 0",
+                    status = WorkflowTestStatus.FAILED
+                )
+                maxWords > 500 -> ActionValidationResult(
+                    message = "⚠️ Very long summary (${maxWords} words) - consider reducing for better readability",
+                    status = WorkflowTestStatus.WARNING
+                )
+                contactName.isEmpty() -> ActionValidationResult(
+                    message = "⚠️ Contact selected but name not available - may need to refresh contacts",
+                    status = WorkflowTestStatus.WARNING
+                )
+                else -> ActionValidationResult(
+                    message = "✓ Gmail AI Summary configured: $contactName (${maxWords} words max)",
+                    status = WorkflowTestStatus.SUCCESS,
+                    details = mapOf(
+                        "contactId" to contactId,
+                        "contactName" to contactName,
+                        "maxWords" to maxWords
+                    )
+                )
+            }
+        }
         ActionType.AI_ANALYZE -> {
             val prompt = action.config["prompt"]
             val outputVar = action.config["outputVar"] ?: "ai_analysis"
@@ -3239,6 +3442,11 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
             ActionType.SEND_TELEGRAM, ActionType.REPLY_TELEGRAM, ActionType.AUTO_REPLY_TELEGRAM -> platforms.add(WorkflowPlatform.TELEGRAM)
             ActionType.FORWARD_GMAIL_TO_TELEGRAM -> {
                 platforms.add(WorkflowPlatform.GMAIL)
+                platforms.add(WorkflowPlatform.TELEGRAM)
+            }
+            ActionType.GMAIL_AI_SUMMARY_TO_TELEGRAM -> {
+                platforms.add(WorkflowPlatform.GMAIL)
+                platforms.add(WorkflowPlatform.AI)
                 platforms.add(WorkflowPlatform.TELEGRAM)
             }
             ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY, 

@@ -585,6 +585,7 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.ReplyToUserTelegram,
                 is MultiUserAction.AutoReplyTelegram,
                 is MultiUserAction.ForwardUserTelegram,
+                is MultiUserAction.GmailAISummaryToTelegram,
                 is MultiUserAction.SendToMultipleUsers,
                 is MultiUserAction.BroadcastMessage,
                 is MultiUserAction.AIGenerateResponse,
@@ -695,6 +696,10 @@ class WorkflowValidator(private val context: Context) {
                     action.context?.let { extractVariables(it, usedVariables) }
                     definedVariables.add(action.outputVariable)
                 }
+                is MultiUserAction.GmailAISummaryToTelegram -> {
+                    // This action uses a fixed template, so no custom variables to extract
+                    definedVariables.add(action.outputSummaryVariable)
+                }
                 is MultiUserAction.AISmartSummarizeAndForward -> {
                     extractVariables(action.triggerContent, usedVariables)
                     definedVariables.add(action.summaryOutputVariable)
@@ -785,6 +790,9 @@ class WorkflowValidator(private val context: Context) {
                 }
                 is MultiUserAction.AIAutoEmailSummarizer -> {
                     aiOutputVariables.add(action.summaryOutputVariable)
+                }
+                is MultiUserAction.GmailAISummaryToTelegram -> {
+                    aiOutputVariables.add(action.outputSummaryVariable)
                 }
                 is MultiUserAction.ConditionalAction -> conditionalActions.add(action)
                 // Non-AI actions don't produce output variables

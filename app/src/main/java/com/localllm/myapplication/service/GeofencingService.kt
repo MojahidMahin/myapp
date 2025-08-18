@@ -5,6 +5,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
@@ -179,18 +181,35 @@ class GeofencingService(
                     .build()
 
                 Log.i(TAG, "📡 Registering geofences with Google Play Services...")
-                geofencingClient.addGeofences(geofenceRequest, getGeofencePendingIntent())
-                    .addOnSuccessListener {
-                        Log.i(TAG, "✅ Geofences registered successfully with Google Play Services")
-                        continuation.resume(Result.success(geofences.size))
-                    }
-                    .addOnFailureListener { exception ->
-                        val errorCode = (exception as? com.google.android.gms.common.api.ApiException)?.statusCode
-                        val errorMessage = getGeofenceErrorMessage(errorCode)
-                        Log.e(TAG, "❌ Failed to register geofences: $errorMessage")
-                        Log.e(TAG, "🔍 Exception details: ${exception.message}")
-                        continuation.resume(Result.failure(Exception("$errorMessage (Code: $errorCode)")))
-                    }
+                
+                // Check permission before making the call
+                if (ActivityCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED) {
+                    val error = "Location permission not granted for geofence registration"
+                    Log.e(TAG, "❌ $error")
+                    continuation.resume(Result.failure(SecurityException(error)))
+                    return@suspendCoroutine
+                }
+                
+                try {
+                    geofencingClient.addGeofences(geofenceRequest, getGeofencePendingIntent())
+                        .addOnSuccessListener {
+                            Log.i(TAG, "✅ Geofences registered successfully with Google Play Services")
+                            continuation.resume(Result.success(geofences.size))
+                        }
+                        .addOnFailureListener { exception ->
+                            val errorCode = (exception as? com.google.android.gms.common.api.ApiException)?.statusCode
+                            val errorMessage = getGeofenceErrorMessage(errorCode)
+                            Log.e(TAG, "❌ Failed to register geofences: $errorMessage")
+                            Log.e(TAG, "🔍 Exception details: ${exception.message}")
+                            continuation.resume(Result.failure(Exception("$errorMessage (Code: $errorCode)")))
+                        }
+                } catch (e: SecurityException) {
+                    Log.e(TAG, "❌ SecurityException: Location permission required", e)
+                    continuation.resume(Result.failure(e))
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "💥 Exception while building geofences: ${e.message}", e)
                 continuation.resume(Result.failure(e))
@@ -204,9 +223,29 @@ class GeofencingService(
     private fun checkGeofenceRequirements(): List<String> {
         val issues = mutableListOf<String>()
 
+        Log.d(TAG, "🔍 Running pre-flight geofencing checks...")
+
         // Check location permissions
         if (!hasLocationPermissions()) {
             issues.add("Location permissions not granted")
+            Log.w(TAG, "❌ Location permissions check failed")
+        } else {
+            Log.d(TAG, "✅ Location permissions check passed")
+        }
+
+        // Check background location permission (Android 10+)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val hasBackground = androidx.core.app.ActivityCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            
+            if (!hasBackground) {
+                issues.add("Background location permission not granted (required for reliable geofencing)")
+                Log.w(TAG, "⚠️ Background location permission missing - geofencing may be unreliable")
+            } else {
+                Log.d(TAG, "✅ Background location permission check passed")
+            }
         }
 
         // Check if Google Play Services is available
@@ -214,16 +253,58 @@ class GeofencingService(
         val resultCode = availability.isGooglePlayServicesAvailable(context)
         if (resultCode != com.google.android.gms.common.ConnectionResult.SUCCESS) {
             issues.add("Google Play Services not available (code: $resultCode)")
+            Log.e(TAG, "❌ Google Play Services check failed with code: $resultCode")
+        } else {
+            Log.d(TAG, "✅ Google Play Services check passed")
         }
 
         // Check if location is enabled
-        val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
-        if (!locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) && 
-            !locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        
+        if (!gpsEnabled && !networkEnabled) {
             issues.add("Location services disabled")
+            Log.e(TAG, "❌ Location services check failed - both GPS and Network disabled")
+        } else {
+            Log.d(TAG, "✅ Location services check passed (GPS: $gpsEnabled, Network: $networkEnabled)")
+        }
+
+        // Check if device supports geofencing
+        val hasLocationFeature = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION)
+        if (!hasLocationFeature) {
+            issues.add("Device does not support location features")
+            Log.e(TAG, "❌ Device location feature check failed")
+        } else {
+            Log.d(TAG, "✅ Device location feature check passed")
+        }
+
+        // Check if running on emulator (emulators often have geofencing issues)
+        if (isRunningOnEmulator()) {
+            issues.add("Running on emulator - geofencing may not work reliably")
+            Log.w(TAG, "⚠️ Running on emulator - geofencing issues are common")
+        }
+
+        Log.i(TAG, "🔍 Pre-flight checks complete: ${issues.size} issues found")
+        if (issues.isNotEmpty()) {
+            Log.w(TAG, "❌ Issues: ${issues.joinToString(", ")}")
         }
 
         return issues
+    }
+
+    /**
+     * Check if running on Android emulator
+     */
+    private fun isRunningOnEmulator(): Boolean {
+        return (android.os.Build.FINGERPRINT.startsWith("generic")
+                || android.os.Build.FINGERPRINT.startsWith("unknown")
+                || android.os.Build.MODEL.contains("google_sdk")
+                || android.os.Build.MODEL.contains("Emulator")
+                || android.os.Build.MODEL.contains("Android SDK built for x86")
+                || android.os.Build.MANUFACTURER.contains("Genymotion")
+                || (android.os.Build.BRAND.startsWith("generic") && android.os.Build.DEVICE.startsWith("generic"))
+                || "google_sdk" == android.os.Build.PRODUCT)
     }
 
     /**
@@ -246,6 +327,17 @@ class GeofencingService(
     suspend fun removeAllGeofences(): Result<Unit> = withContext(Dispatchers.IO) {
         return@withContext suspendCoroutine { continuation ->
             try {
+                // Check permission before making the call
+                if (ActivityCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED) {
+                    val error = "Location permission not granted for geofence removal"
+                    Log.e(TAG, "❌ $error")
+                    continuation.resume(Result.failure(SecurityException(error)))
+                    return@suspendCoroutine
+                }
+                
                 geofencingClient.removeGeofences(getGeofencePendingIntent())
                     .addOnSuccessListener {
                         Log.d(TAG, "All geofences removed successfully")
@@ -255,6 +347,9 @@ class GeofencingService(
                         Log.e(TAG, "Failed to remove geofences", exception)
                         continuation.resume(Result.failure(exception))
                     }
+            } catch (e: SecurityException) {
+                Log.e(TAG, "❌ SecurityException: Location permission required", e)
+                continuation.resume(Result.failure(e))
             } catch (e: Exception) {
                 Log.e(TAG, "Error removing geofences", e)
                 continuation.resume(Result.failure(e))
@@ -268,6 +363,17 @@ class GeofencingService(
     suspend fun removeGeofences(geofenceIds: List<String>): Result<Unit> = withContext(Dispatchers.IO) {
         return@withContext suspendCoroutine { continuation ->
             try {
+                // Check permission before making the call
+                if (ActivityCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED) {
+                    val error = "Location permission not granted for geofence removal"
+                    Log.e(TAG, "❌ $error")
+                    continuation.resume(Result.failure(SecurityException(error)))
+                    return@suspendCoroutine
+                }
+                
                 geofencingClient.removeGeofences(geofenceIds)
                     .addOnSuccessListener {
                         Log.d(TAG, "Geofences removed: ${geofenceIds.joinToString()}")
@@ -277,6 +383,9 @@ class GeofencingService(
                         Log.e(TAG, "Failed to remove geofences: ${geofenceIds.joinToString()}", exception)
                         continuation.resume(Result.failure(exception))
                     }
+            } catch (e: SecurityException) {
+                Log.e(TAG, "❌ SecurityException: Location permission required", e)
+                continuation.resume(Result.failure(e))
             } catch (e: Exception) {
                 Log.e(TAG, "Error removing specific geofences", e)
                 continuation.resume(Result.failure(e))
@@ -504,6 +613,31 @@ class GeofencingService(
     }
 
     /**
+     * Request background location permission through settings
+     */
+    fun requestBackgroundLocationThroughSettings(): android.content.Intent? {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val hasBackground = androidx.core.app.ActivityCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            
+            if (!hasBackground) {
+                Log.i(TAG, "🔧 Creating intent to open app-specific settings for background location")
+                val intent = android.content.Intent()
+                intent.action = android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                intent.data = android.net.Uri.fromParts("package", context.packageName, null)
+                intent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                intent
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    /**
      * Comprehensive diagnostic check for geofencing capability
      */
     fun diagnoseGeofencingStatus(): String {
@@ -528,8 +662,12 @@ class GeofencingService(
             if (hasBackground) {
                 report.appendLine("✅ Background location: GRANTED")
             } else {
-                report.appendLine("⚠️ Background location: NOT GRANTED")
-                report.appendLine("   Fix: Settings > Apps > YourApp > Permissions > Location > Allow all the time")
+                report.appendLine("❌ Background location: NOT GRANTED (CRITICAL FOR GEOFENCING)")
+                report.appendLine("   📱 MANUAL FIX REQUIRED:")
+                report.appendLine("   1. Open Android Settings > Apps > ${context.applicationInfo.loadLabel(context.packageManager)}")
+                report.appendLine("   2. Tap 'Permissions' > 'Location'")
+                report.appendLine("   3. Select 'Allow all the time' (NOT just 'Allow only while using app')")
+                report.appendLine("   ⚠️  Without this, location triggers will NOT work reliably!")
             }
         }
 
@@ -544,9 +682,9 @@ class GeofencingService(
         }
 
         // 4. Location Services
-        val locationManager = context.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
-        val gpsEnabled = locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)
-        val networkEnabled = locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+        val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        val gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+        val networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
         
         if (gpsEnabled || networkEnabled) {
             report.appendLine("✅ Location services: ENABLED")
@@ -559,7 +697,7 @@ class GeofencingService(
 
         // 5. Battery optimization
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-            val powerManager = context.getSystemService(android.content.Context.POWER_SERVICE) as android.app.PowerManager
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             if (powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
                 report.appendLine("✅ Battery optimization: DISABLED (Good)")
             } else {
@@ -570,7 +708,7 @@ class GeofencingService(
         }
 
         // 6. Device capability
-        val hasGeofencing = context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LOCATION)
+        val hasGeofencing = context.packageManager.hasSystemFeature(PackageManager.FEATURE_LOCATION)
         if (hasGeofencing) {
             report.appendLine("✅ Device location features: SUPPORTED")
         } else {

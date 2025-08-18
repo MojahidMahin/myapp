@@ -1,11 +1,13 @@
 package com.localllm.myapplication.ui
 
+import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.core.app.ActivityCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +15,10 @@ import com.localllm.myapplication.di.AppContainer
 import com.localllm.myapplication.permission.PermissionManager
 import com.localllm.myapplication.service.BackgroundServiceManager
 import com.localllm.myapplication.ui.screen.SignInScreen
+import com.localllm.myapplication.service.GeofencingService
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 
 class MainActivity : ComponentActivity() {
 
@@ -55,10 +61,10 @@ class MainActivity : ComponentActivity() {
         // Universal optimizations for all devices
         initializeUniversalOptimizations()
         
-        // Request all permissions after UI is ready
+        // Request critical location permissions first for geofencing
         Handler(Looper.getMainLooper()).postDelayed({
-            requestAllPermissionsOnStartup()
-        }, 2000)
+            requestCriticalPermissionsFirst()
+        }, 1000)
     }
     
     /**
@@ -97,14 +103,74 @@ class MainActivity : ComponentActivity() {
     }
     
     /**
-     * Request all sensor and device permissions on app startup
+     * Request critical location permissions first, then other permissions
      */
-    private fun requestAllPermissionsOnStartup() {
-        Log.d("MainActivity", "🔐 Starting comprehensive permission request flow")
+    private fun requestCriticalPermissionsFirst() {
+        Log.d("MainActivity", "🔐 Starting CRITICAL location permission request for geofencing")
         
-        // Create a permission flow that requests permissions in logical groups
+        // First, prioritize location permissions (especially background location)
+        permissionManager.requestLocationPermissions(
+            onSuccess = { 
+                Log.d("MainActivity", "✅ CRITICAL location permissions granted - geofencing ready!")
+                // Now request other permissions
+                requestRemainingPermissions()
+            },
+            onDenied = { denied -> 
+                Log.e("MainActivity", "❌ CRITICAL location permissions denied: $denied")
+                Log.e("MainActivity", "⚠️ GEOFENCING WILL NOT WORK RELIABLY!")
+                if (denied.contains(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION)) {
+                    showBackgroundLocationWarning()
+                }
+                // Still request other permissions
+                requestRemainingPermissions()
+            },
+            onError = { error ->
+                Log.e("MainActivity", "❌ Location permission error", error)
+                requestRemainingPermissions()
+            }
+        )
+    }
+    
+    /**
+     * Request remaining non-critical permissions after location permissions
+     */
+    private fun requestRemainingPermissions() {
+        Log.d("MainActivity", "🔐 Requesting remaining permissions...")
+        
+        // Create a permission flow that requests remaining permissions
         val permissionFlow = PermissionFlow()
-        permissionFlow.startPermissionFlow()
+        permissionFlow.startRemainingPermissionFlow()
+    }
+    
+    /**
+     * Show warning about background location permission
+     */
+    private fun showBackgroundLocationWarning() {
+        Log.w("MainActivity", "🚨 CRITICAL WARNING: Background location permission denied!")
+        Log.w("MainActivity", "📱 TO FIX: Settings > Apps > ${applicationInfo.loadLabel(packageManager)} > Permissions > Location > 'Allow all the time'")
+        Log.w("MainActivity", "⚠️ Without this permission, location-based workflows will NOT trigger!")
+        
+        // Show this warning again in 30 seconds if still not granted
+        Handler(Looper.getMainLooper()).postDelayed({
+            checkBackgroundLocationAgain()
+        }, 30000)
+    }
+    
+    /**
+     * Check background location permission again and show guidance
+     */
+    private fun checkBackgroundLocationAgain() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val hasBackground = androidx.core.app.ActivityCompat.checkSelfPermission(
+                this,
+                android.Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            
+            if (!hasBackground) {
+                Log.w("MainActivity", "🔄 Background location still not granted - showing guidance again")
+                showBackgroundLocationWarning()
+            }
+        }
     }
     
     /**
@@ -115,6 +181,12 @@ class MainActivity : ComponentActivity() {
         private val deniedPermissions = mutableListOf<String>()
         
         fun startPermissionFlow() {
+            requestNextPermissionGroup()
+        }
+        
+        fun startRemainingPermissionFlow() {
+            // Skip location permissions since they were already requested
+            currentStep = 1 // Start from notifications
             requestNextPermissionGroup()
         }
         
@@ -139,22 +211,9 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 1 -> {
-                    Log.d("MainActivity", "📍 Step 2: Requesting Location (GPS, Fine, Coarse)")
-                    permissionManager.requestLocationPermissions(
-                        onSuccess = { 
-                            Log.d("MainActivity", "✅ Location permissions granted")
-                            nextStep()
-                        },
-                        onDenied = { denied -> 
-                            deniedPermissions.addAll(denied)
-                            Log.w("MainActivity", "⚠️ Location permissions denied: $denied")
-                            nextStep()
-                        },
-                        onError = { error ->
-                            Log.e("MainActivity", "❌ Location permission error", error)
-                            nextStep()
-                        }
-                    )
+                    // Skip location permissions in remaining flow since they were already requested
+                    Log.d("MainActivity", "📍 Step 2: Skipping Location (already requested)")
+                    nextStep()
                 }
                 2 -> {
                     Log.d("MainActivity", "📷 Step 3: Requesting Media (Camera, Gallery, Storage)")
@@ -238,11 +297,67 @@ class MainActivity : ComponentActivity() {
             } else {
                 Log.i("MainActivity", "✨ All permissions granted! App has full sensor and device access.")
             }
+            
+            // Run geofencing diagnostic after permissions are processed
+            runGeofencingDiagnostic()
+            
+            // If background location is missing, provide direct help
+            Handler(Looper.getMainLooper()).postDelayed({
+                checkAndPromptBackgroundLocationPermission()
+            }, 3000)
         }
     }
 
     fun launchSignInActivity(intent: Intent) {
         signInResultLauncher.launch(intent)
+    }
+    
+    /**
+     * Check and help user with background location permission
+     */
+    private fun checkAndPromptBackgroundLocationPermission() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val workflowRepository = AppContainer.provideWorkflowRepository(this@MainActivity)
+                val workflowEngine = AppContainer.provideWorkflowEngine(this@MainActivity)
+                val geofencingService = GeofencingService(this@MainActivity, workflowRepository, workflowEngine)
+                
+                val settingsIntent = geofencingService.requestBackgroundLocationThroughSettings()
+                if (settingsIntent != null) {
+                    Log.w("MainActivity", "🔧 Background location permission needed - user should check Settings")
+                    Log.w("MainActivity", "📱 To fix: Settings > Apps > MyApplication > Permissions > Location > 'Allow all the time'")
+                    
+                    // You could also start the settings activity here if desired
+                    // startActivity(settingsIntent)
+                }
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Error checking background location permission", e)
+            }
+        }
+    }
+    
+    /**
+     * Run comprehensive geofencing diagnostic
+     */
+    private fun runGeofencingDiagnostic() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                Log.i("MainActivity", "🔍 Running geofencing system diagnostic...")
+                
+                val workflowRepository = AppContainer.provideWorkflowRepository(this@MainActivity)
+                val workflowEngine = AppContainer.provideWorkflowEngine(this@MainActivity)
+                val geofencingService = GeofencingService(this@MainActivity, workflowRepository, workflowEngine)
+                
+                // Run the comprehensive diagnostic
+                val diagnosticReport = geofencingService.diagnoseGeofencingStatus()
+                
+                // Also log it under MainActivity tag for easy filtering
+                Log.i("MainActivity", "📋 GEOFENCING DIAGNOSTIC COMPLETE - See GeofencingService logs for full report")
+                
+            } catch (e: Exception) {
+                Log.e("MainActivity", "❌ Failed to run geofencing diagnostic: ${e.message}", e)
+            }
+        }
     }
     
     fun launchChangeEmailActivity(intent: Intent) {

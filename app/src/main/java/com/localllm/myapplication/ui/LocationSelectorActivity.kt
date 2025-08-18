@@ -23,11 +23,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.gms.location.LocationServices
+import android.content.pm.ApplicationInfo
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.MapView
@@ -53,6 +55,21 @@ class LocationSelectorActivity : ComponentActivity(), OnMapReadyCallback {
         const val EXTRA_INITIAL_LOCATION = "initial_location"
         const val EXTRA_INITIAL_RADIUS = "initial_radius"
         private const val DEFAULT_ZOOM = 15f
+    }
+    
+    private fun isGoogleMapsApiKeyConfigured(): Boolean {
+        return try {
+            val appInfo = packageManager.getApplicationInfo(
+                packageName, 
+                android.content.pm.PackageManager.GET_META_DATA
+            )
+            val apiKey = appInfo.metaData?.getString("com.google.android.geo.API_KEY")
+            !apiKey.isNullOrBlank() && 
+            apiKey != "YOUR_GOOGLE_MAPS_API_KEY_HERE" &&
+            !apiKey.startsWith("AIzaSyDEMO_KEY")
+        } catch (e: Exception) {
+            false
+        }
     }
     
     private var googleMap: GoogleMap? = null
@@ -160,16 +177,62 @@ class LocationSelectorActivity : ComponentActivity(), OnMapReadyCallback {
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    AndroidView(
-                        factory = { context ->
-                            MapView(context).apply {
-                                mapView = this
-                                onCreate(null)
-                                getMapAsync(this@LocationSelectorActivity)
+                    var mapLoadError by remember { mutableStateOf(!isGoogleMapsApiKeyConfigured()) }
+                    
+                    if (!mapLoadError) {
+                        AndroidView(
+                            factory = { context ->
+                                try {
+                                    MapView(context).apply {
+                                        mapView = this
+                                        onCreate(null)
+                                        getMapAsync(this@LocationSelectorActivity)
+                                    }
+                                } catch (e: Exception) {
+                                    mapLoadError = true
+                                    // Return empty view in case of error
+                                    androidx.compose.ui.platform.ComposeView(context)
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    
+                    if (mapLoadError) {
+                        // Show error message if Google Maps API key is not configured
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "🗺️ Maps Not Available",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Google Maps API key not configured.\nPlease contact the developer.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { 
+                                    // Allow user to continue without map
+                                    onLocationSelected(LocationSelection(
+                                        latitude = 0.0,
+                                        longitude = 0.0,
+                                        locationName = "Manual Location",
+                                        address = "Location selected without map"
+                                    ))
+                                }
+                            ) {
+                                Text("Continue Without Map")
                             }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                        }
+                    }
                     
                     // My Location button
                     FloatingActionButton(
@@ -465,11 +528,11 @@ class LocationSelectorActivity : ComponentActivity(), OnMapReadyCallback {
         return ActivityCompat.checkSelfPermission(
             this,
             Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED ||
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
                 ActivityCompat.checkSelfPermission(
                     this,
                     Manifest.permission.ACCESS_COARSE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
     
     private fun requestLocationPermission() {

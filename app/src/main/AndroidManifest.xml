@@ -78,7 +78,11 @@
         android:largeHeap="true"
         android:hardwareAccelerated="true">
 
-        <!-- Google Maps API Key -->
+        <!-- Google Maps API Key - REPLACE WITH YOUR REAL API KEY -->
+        <!-- 1. Go to: https://console.cloud.google.com/apis/credentials -->
+        <!-- 2. Create new API key or use existing one -->
+        <!-- 3. Enable Maps SDK for Android -->
+        <!-- 4. Replace YOUR_GOOGLE_MAPS_API_KEY_HERE with your actual key -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyBLbIgF7F8f8hjHHR0SqYrFenuUNoS9gb0" />

@@ -210,6 +210,7 @@ class MultiUserWorkflowEngine(
                 // Telegram Actions
                 is MultiUserAction.SendToUserTelegram -> executeSendToUserTelegram(action, context)
                 is MultiUserAction.ForwardGmailToTelegram -> executeForwardGmailToTelegram(action, context)
+                is MultiUserAction.GmailAISummaryToTelegram -> executeGmailAISummaryToTelegram(action, context)
                 is MultiUserAction.ReplyToUserTelegram -> executeReplyToUserTelegram(action, context)
                 is MultiUserAction.AutoReplyTelegram -> executeAutoReplyTelegram(action, context)
                 is MultiUserAction.ForwardUserTelegram -> executeForwardUserTelegram(action, context)
@@ -720,6 +721,156 @@ class MultiUserWorkflowEngine(
                 Result.failure(Exception(errorMessage))
             }
         )
+    }
+    
+    /**
+     * Execute Gmail AI Summary to Telegram action using saved Telegram preferences
+     * Uses bot token from Telegram tab and selected contact from saved users
+     */
+    private suspend fun executeGmailAISummaryToTelegram(action: MultiUserAction.GmailAISummaryToTelegram, context: WorkflowExecutionContext): Result<String> {
+        Log.i(TAG, "📧🤖✈️ === EXECUTING SIMPLIFIED GMAIL AI SUMMARY TO TELEGRAM ===")
+        Log.i(TAG, "💬 Selected Contact ID: ${action.selectedContactId}")
+        Log.i(TAG, "📏 Max Words: ${action.maxSummaryWords}")
+        
+        try {
+            // Step 1: Get bot token and contact info from TelegramPreferences
+            val telegramPrefs = com.localllm.myapplication.data.TelegramPreferences(this.context)
+            val botToken = telegramPrefs.getBotToken()
+            
+            if (botToken.isNullOrEmpty()) {
+                return Result.failure(Exception("No Telegram bot token found. Please set up Telegram bot in the Telegram tab first."))
+            }
+            
+            // Get selected contact from saved users
+            val savedUsers = telegramPrefs.getSavedUsers()
+            val selectedContact = savedUsers[action.selectedContactId]
+            
+            if (selectedContact == null) {
+                return Result.failure(Exception("Selected Telegram contact not found. Contact ID: ${action.selectedContactId}"))
+            }
+            
+            Log.i(TAG, "🤖 Using bot token: ${botToken.take(8)}:***...")
+            Log.i(TAG, "👤 Sending to: ${selectedContact.displayName} (ID: ${selectedContact.id})")
+            
+            // Step 2: Create Telegram service with existing bot token
+            val telegramService = TelegramBotService(this.context)
+            val initResult = telegramService.initializeBot(botToken)
+            initResult.fold(
+                onSuccess = { username ->
+                    Log.i(TAG, "✅ Telegram bot initialized: @$username")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "❌ Failed to initialize bot: ${error.message}")
+                    return Result.failure(Exception("Failed to initialize Telegram bot: ${error.message}"))
+                }
+            )
+            
+            // Step 3: Extract email content from context variables
+            val emailFrom = context.variables["email_from"] ?: "Unknown Sender"
+            val emailSubject = context.variables["email_subject"] ?: "No Subject"
+            val emailBody = context.variables["email_body"] ?: ""
+            
+            if (emailBody.isEmpty()) {
+                return Result.failure(Exception("No email content available for summarization"))
+            }
+            
+            Log.i(TAG, "📧 Processing email from: $emailFrom")
+            Log.i(TAG, "📝 Subject: $emailSubject")
+            Log.i(TAG, "📄 Body length: ${emailBody.length} characters")
+            
+            // Step 4: Generate AI summary
+            val emailContent = buildString {
+                append("Subject: $emailSubject\n")
+                append("From: $emailFrom\n")
+                append("Email Content: $emailBody")
+            }
+            
+            val summaryAction = MultiUserAction.AISummarizeContent(
+                content = emailContent,
+                maxLength = action.maxSummaryWords,
+                outputVariable = action.outputSummaryVariable
+            )
+            
+            Log.i(TAG, "🧠 Generating AI summary (max ${action.maxSummaryWords} words)...")
+            val summaryResult = aiProcessor.processSummarizeContent(summaryAction, context)
+            
+            val aiSummary = summaryResult.fold(
+                onSuccess = {
+                    val summary = context.variables[action.outputSummaryVariable] ?: "Summary not available"
+                    Log.i(TAG, "✅ AI summary generated: ${summary.take(100)}...")
+                    summary
+                },
+                onFailure = { error ->
+                    Log.w(TAG, "❌ AI summarization failed: ${error.message}")
+                    return Result.failure(Exception("AI summarization failed: ${error.message}"))
+                }
+            )
+            
+            // Step 5: Build simple Telegram message with fixed template
+            val telegramMessage = buildString {
+                appendLine("📧 *Gmail Summary*")
+                appendLine()
+                appendLine("*From:* $emailFrom")
+                appendLine("*Subject:* $emailSubject")
+                appendLine()
+                appendLine("*Summary:*")
+                appendLine(aiSummary)
+                appendLine()
+                append("_Sent via AI Workflow Automation_")
+            }
+            
+            Log.i(TAG, "📱 Final message preview: ${telegramMessage.take(150)}...")
+            Log.i(TAG, "📊 Message length: ${telegramMessage.length} characters")
+            
+            // Step 6: Send to Telegram
+            Log.i(TAG, "📤 Sending AI summary to ${selectedContact.displayName}...")
+            val sendResult = telegramService.sendMessage(
+                chatId = action.selectedContactId,
+                text = telegramMessage,
+                parseMode = "Markdown"
+            )
+            
+            return sendResult.fold(
+                onSuccess = { messageId ->
+                    Log.i(TAG, "🎉 SUCCESS: Gmail AI Summary sent to Telegram!")
+                    Log.i(TAG, "🆔 Telegram Message ID: $messageId")
+                    Log.i(TAG, "👤 Sent to: ${selectedContact.displayName}")
+                    Log.i(TAG, "💬 Chat ID: ${action.selectedContactId}")
+                    Log.i(TAG, "📧 Original email from: $emailFrom")
+                    Log.i(TAG, "📝 Subject: $emailSubject")
+                    Log.i(TAG, "🤖 Summary words: ~${aiSummary.split(" ").size}")
+                    
+                    // Store summary in context for potential further use
+                    context.variables[action.outputSummaryVariable] = aiSummary
+                    
+                    Result.success("AI-powered Gmail summary sent to ${selectedContact.displayName}: Message ID $messageId")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "❌ FAILED: Could not send AI summary to Telegram")
+                    Log.e(TAG, "💥 Error: ${error.message}")
+                    Log.e(TAG, "👤 Target: ${selectedContact.displayName}")
+                    Log.e(TAG, "💬 Chat ID: ${action.selectedContactId}")
+                    
+                    val errorMessage = when {
+                        error.message?.contains("chat not found") == true -> 
+                            "Chat with ${selectedContact.displayName} not found. They may need to start a conversation with your bot first."
+                        error.message?.contains("bot was blocked") == true -> 
+                            "${selectedContact.displayName} has blocked your bot. Please ask them to unblock it."
+                        error.message?.contains("Forbidden") == true || error.message?.contains("401") == true ->
+                            "Bot doesn't have permission to send messages to ${selectedContact.displayName}."
+                        error.message?.contains("Bad Request") == true ->
+                            "Invalid message format or chat ID for ${selectedContact.displayName}."
+                        else -> "Failed to send AI summary to ${selectedContact.displayName}: ${error.message}"
+                    }
+                    
+                    Result.failure(Exception(errorMessage))
+                }
+            )
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 Unexpected error in Gmail AI Summary to Telegram", e)
+            return Result.failure(Exception("Unexpected error: ${e.message}"))
+        }
     }
     
     private suspend fun executeReplyToUserTelegram(action: MultiUserAction.ReplyToUserTelegram, context: WorkflowExecutionContext): Result<String> {

@@ -126,8 +126,8 @@ class LocationPermissionCommand(
                     Log.d(TAG, "Background location permission granted")
                     onSuccess()
                 } else {
-                    Log.w(TAG, "Background location permission denied")
-                    // Background denied but foreground was granted - still considered success for basic functionality
+                    Log.w(TAG, "Background location permission denied - this will affect geofencing reliability")
+                    // Background location is critical for geofencing - mark as denied
                     onDenied(listOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION))
                 }
             }

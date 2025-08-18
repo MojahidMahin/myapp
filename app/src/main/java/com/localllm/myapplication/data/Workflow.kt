@@ -294,6 +294,16 @@ sealed class MultiUserAction {
     ) : MultiUserAction()
     
     /**
+     * Gmail AI Summary to Telegram - Simplified version using existing Telegram setup
+     * Uses bot token from Telegram tab and contact picker for chat selection
+     */
+    data class GmailAISummaryToTelegram(
+        val selectedContactId: Long, // Telegram user ID from saved contacts
+        val maxSummaryWords: Int = 100, // Only configurable field - word limit for summary
+        val outputSummaryVariable: String = "gmail_ai_summary"
+    ) : MultiUserAction()
+    
+    /**
      * Smart action that summarizes trigger content and forwards based on keywords
      * This implements the Zapier-like functionality requested
      */
