@@ -5,6 +5,7 @@ This directory contains comprehensive documentation for the LocalLLM Workflow Sy
 ## 📁 Documentation Structure
 
 ### 📖 Current Documentation
+- **[Image Analysis Workflows](./IMAGE_ANALYSIS_WORKFLOWS.md)** - Complete guide for image analysis triggers and actions with OCR, object detection, and AI analysis
 - **[Auto Email Summarizer Implementation](./AUTO_EMAIL_SUMMARIZER.md)** - Complete implementation guide for the auto email summarization feature
 - **[Email Summarization Implementation](./EMAIL_SUMMARIZATION_IMPLEMENTATION.md)** - Comprehensive documentation for the multi-strategy email summarization system
 - **[Smart Workflow System](./SMART_WORKFLOW_SYSTEM.md)** - Advanced Zapier-like workflow system with AI integration
@@ -12,8 +13,10 @@ This directory contains comprehensive documentation for the LocalLLM Workflow Sy
 - **[API Reference](./API_REFERENCE.md)** - Complete API documentation for workflow components
 - **[Troubleshooting Email Summarization](./TROUBLESHOOTING_EMAIL_SUMMARIZATION.md)** - Complete troubleshooting guide for email summarization issues
 - **[Quick Reference - Email Summarization](./QUICK_REFERENCE_EMAIL_SUMMARIZATION.md)** - Developer quick reference for email summarization
+- **[Quick Reference - Image Analysis](./QUICK_REFERENCE_IMAGE_ANALYSIS.md)** - Quick reference for image analysis workflows
 
 ### 🏗️ Implementation Guides
+- **[Image Analysis UI Guide](./guides/IMAGE_ANALYSIS_UI_GUIDE.md)** - Step-by-step UI guide for creating image analysis workflows
 - **[Adding New Actions](./guides/ADDING_NEW_ACTIONS.md)** - Step-by-step guide for creating new workflow actions
 - **[Adding New Triggers](./guides/ADDING_NEW_TRIGGERS.md)** - How to implement new workflow triggers
 - **[AI Service Integration](./guides/AI_SERVICE_INTEGRATION.md)** - Integrating AI services into workflows
@@ -31,9 +34,10 @@ This directory contains comprehensive documentation for the LocalLLM Workflow Sy
 
 ## 🚀 Quick Start
 
-1. **For Developers**: Start with [Development Guidelines](./DEVELOPMENT_GUIDELINES.md)
-2. **For Feature Implementation**: Use [Adding New Actions](./guides/ADDING_NEW_ACTIONS.md) 
-3. **For Architecture Understanding**: Read [Architecture Overview](./technical/ARCHITECTURE.md)
+1. **For Image Analysis**: Start with [Image Analysis Workflows](./IMAGE_ANALYSIS_WORKFLOWS.md) or [UI Guide](./guides/IMAGE_ANALYSIS_UI_GUIDE.md)
+2. **For Developers**: Start with [Development Guidelines](./DEVELOPMENT_GUIDELINES.md)
+3. **For Feature Implementation**: Use [Adding New Actions](./guides/ADDING_NEW_ACTIONS.md) 
+4. **For Architecture Understanding**: Read [Architecture Overview](./technical/ARCHITECTURE.md)
 
 ## 📝 Contributing to Documentation
 
