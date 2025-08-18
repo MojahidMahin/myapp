@@ -1183,7 +1183,7 @@ fun TriggerPickerDialog(
     var selectedCategory by remember { mutableStateOf("Gmail") }
     var triggerConfig by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     
-    val categories = listOf("Gmail", "Telegram", "Schedule", "Location", "Manual")
+    val categories = listOf("Gmail", "Telegram", "Location", "Manual")
     
     Dialog(onDismissRequest = onDismiss) {
         Card(
