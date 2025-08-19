@@ -37,6 +37,20 @@ class WorkflowTriggerManager(
     private val emailDeduplicationService = EmailDeduplicationService(context)
     private val telegramDeduplicationService = TelegramDeduplicationService(context)
     
+    // Workflow execution queue system
+    private val workflowExecutionQueue = kotlinx.coroutines.channels.Channel<WorkflowExecutionTask>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    private val _isExecutingWorkflow = MutableStateFlow(false)
+    val isExecutingWorkflow: StateFlow<Boolean> = _isExecutingWorkflow.asStateFlow()
+    private var queueProcessor: Job? = null
+    
+    data class WorkflowExecutionTask(
+        val workflow: MultiUserWorkflow,
+        val triggerUserId: String,
+        val triggerData: Map<String, String>,
+        val triggerType: String,
+        val continuation: CompletableDeferred<TriggerExecutionResult>
+    )
+    
     // Rate limiting for email checks
     private val lastEmailCheckTimes = mutableMapOf<String, Long>()
     private val minEmailCheckInterval = 60000L // 1 minute between email checks per workflow
@@ -55,6 +69,9 @@ class WorkflowTriggerManager(
      */
     fun start() {
         Log.i(TAG, "Starting workflow trigger manager")
+        
+        // Start workflow execution queue processor
+        startQueueProcessor()
         
         // Start periodic trigger checking
         startPeriodicTriggerCheck()
@@ -113,6 +130,117 @@ class WorkflowTriggerManager(
         }
         
         Log.i(TAG, "Workflow trigger manager started")
+    }
+    
+    /**
+     * Start the queue processor for serialized workflow execution
+     */
+    private fun startQueueProcessor() {
+        Log.i(TAG, "🚦 Starting workflow execution queue processor")
+        
+        queueProcessor = scope.launch {
+            try {
+                for (task in workflowExecutionQueue) {
+                    try {
+                        _isExecutingWorkflow.value = true
+                        Log.i(TAG, "🔄 Executing workflow from queue: ${task.workflow.name} (Type: ${task.triggerType})")
+                        Log.i(TAG, "📋 Queue status: Processing workflow execution")
+                        
+                        // Execute the workflow
+                        val result = executeWorkflowDirectly(task.workflow, task.triggerUserId, task.triggerData)
+                        
+                        Log.i(TAG, "✅ Workflow completed: ${task.workflow.name}")
+                        task.continuation.complete(result)
+                        
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Error executing workflow from queue: ${task.workflow.name}", e)
+                        task.continuation.complete(
+                            TriggerExecutionResult(task.workflow.id, task.triggerType, false, "Execution failed: ${e.message}")
+                        )
+                    } finally {
+                        _isExecutingWorkflow.value = false
+                        Log.i(TAG, "📋 Queue status: Ready for next workflow")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Queue processor crashed", e)
+            }
+        }
+    }
+    
+    /**
+     * Add workflow to execution queue
+     */
+    private suspend fun queueWorkflowExecution(
+        workflow: MultiUserWorkflow,
+        triggerUserId: String,
+        triggerData: Map<String, String>,
+        triggerType: String
+    ): TriggerExecutionResult {
+        // Check if we should skip execution due to queue backlog
+        if (workflowExecutionQueue.tryReceive().isSuccess) {
+            Log.w(TAG, "⚠️ Queue has pending workflows, current workflow: ${workflow.name}")
+        }
+        
+        val continuation = CompletableDeferred<TriggerExecutionResult>()
+        val task = WorkflowExecutionTask(workflow, triggerUserId, triggerData, triggerType, continuation)
+        
+        Log.i(TAG, "📝 Queuing workflow: ${workflow.name} (Type: $triggerType)")
+        Log.i(TAG, "📋 Queue status: ${if (_isExecutingWorkflow.value) "Busy - workflow will wait" else "Ready - workflow will execute immediately"}")
+        
+        workflowExecutionQueue.trySend(task)
+        
+        return continuation.await()
+    }
+    
+    /**
+     * Execute workflow directly (bypasses queue - only used by queue processor)
+     */
+     private suspend fun executeWorkflowDirectly(
+        workflow: MultiUserWorkflow, 
+        triggerUserId: String, 
+        triggerData: Map<String, String>
+    ): TriggerExecutionResult {
+        return try {
+            // Auto-save contacts from trigger data before executing workflow
+            try {
+                val contactAutoSaveService = com.localllm.myapplication.di.AppContainer.provideContactAutoSaveService(context)
+                contactAutoSaveService.autoSaveFromWorkflowData(triggerData)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to auto-save contacts from workflow data", e)
+            }
+            
+            val result = workflowEngine.executeWorkflow(workflow.id, triggerUserId, triggerData)
+            
+            result.fold(
+                onSuccess = { executionResult ->
+                    Log.i(TAG, "Workflow ${workflow.id} executed successfully from queue")
+                    TriggerExecutionResult(
+                        workflow.id, 
+                        "QueuedExecution", 
+                        true, 
+                        "Successfully executed: ${executionResult.executionId}"
+                    )
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "Workflow ${workflow.id} execution failed from queue", error)
+                    TriggerExecutionResult(
+                        workflow.id, 
+                        "QueuedExecution", 
+                        false, 
+                        "Execution failed: ${error.message}"
+                    )
+                }
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception executing workflow ${workflow.id} from queue", e)
+            TriggerExecutionResult(
+                workflow.id, 
+                "QueuedExecution", 
+                false, 
+                "Exception during execution: ${e.message}"
+            )
+        }
     }
     
     /**
@@ -671,53 +799,14 @@ class WorkflowTriggerManager(
     }
     
     /**
-     * Execute workflow from trigger
+     * Execute workflow from trigger (now uses queue system)
      */
     private suspend fun executeWorkflowWithData(
         workflow: MultiUserWorkflow, 
         triggerUserId: String, 
         triggerData: Map<String, String>
     ): TriggerExecutionResult {
-        return try {
-            // Auto-save contacts from workflow trigger data
-            try {
-                val contactAutoSaveService = com.localllm.myapplication.di.AppContainer.provideContactAutoSaveService(context)
-                contactAutoSaveService.autoSaveFromWorkflowData(triggerData)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to auto-save contacts from workflow data", e)
-            }
-            
-            val result = workflowEngine.executeWorkflow(workflow.id, triggerUserId, triggerData)
-            
-            result.fold(
-                onSuccess = { executionResult ->
-                    Log.i(TAG, "Workflow ${workflow.id} triggered successfully")
-                    TriggerExecutionResult(
-                        workflow.id, 
-                        "Executed", 
-                        true, 
-                        "Execution ID: ${executionResult.executionId}"
-                    )
-                },
-                onFailure = { error ->
-                    Log.e(TAG, "Workflow ${workflow.id} execution failed", error)
-                    TriggerExecutionResult(
-                        workflow.id, 
-                        "ExecutionFailed", 
-                        false, 
-                        "Execution failed: ${error.message}"
-                    )
-                }
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Error executing workflow ${workflow.id}", e)
-            TriggerExecutionResult(
-                workflow.id, 
-                "ExecutionError", 
-                false, 
-                "Error: ${e.message}"
-            )
-        }
+        return queueWorkflowExecution(workflow, triggerUserId, triggerData, "TriggeredExecution")
     }
     
     private suspend fun executeWorkflow(

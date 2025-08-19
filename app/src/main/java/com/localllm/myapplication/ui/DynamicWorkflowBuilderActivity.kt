@@ -24,7 +24,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardOptions
 import com.google.android.gms.maps.model.LatLng
 import com.localllm.myapplication.data.*
 import com.localllm.myapplication.di.AppContainer
@@ -321,6 +323,46 @@ fun DynamicWorkflowBuilderScreen(
                                             "targetUserId" to (action.targetUserId ?: ""),
                                             "originalMessageId" to (action.originalMessageId ?: ""),
                                             "replyBody" to (action.replyBody ?: "")
+                                        )
+                                    )
+                                    // Add missing AI action types
+                                    is MultiUserAction.AI24HourGalleryAnalysis -> ActionConfig(
+                                        type = ActionType.AI_24H_GALLERY_ANALYSIS,
+                                        displayName = "Gallery Analysis: ${action.maxImages / 2}h → ${action.deliveryMethod}", // Use maxImages/2 as rough estimate for backwards compatibility
+                                        config = mapOf<String, String>(
+                                            "timeFrameHours" to (action.maxImages / 2).toString(), // Rough backwards compatibility
+                                            "deliveryMethod" to action.deliveryMethod,
+                                            "recipientEmails" to action.recipientEmail, // Map old recipientEmail to new recipientEmails
+                                            "telegramChatId" to action.telegramChatId.toString(),
+                                            "analysisPrompt" to action.analysisPrompt,
+                                            // Legacy fields for compatibility
+                                            "searchKeyword" to action.searchKeyword,
+                                            "maxImages" to action.maxImages.toString(),
+                                            "includeImagePaths" to action.includeImagePaths.toString(),
+                                            "outputVar" to action.outputVariable
+                                        )
+                                    )
+                                    is MultiUserAction.AISmartSummarizeAndForward -> ActionConfig(
+                                        type = ActionType.AI_SMART_SUMMARIZE_AND_FORWARD,
+                                        displayName = "AI Smart Summarize and Forward",
+                                        config = mapOf<String, String>(
+                                            "triggerContent" to action.triggerContent,
+                                            "summarizationStyle" to action.summarizationStyle,
+                                            "forwardingRules" to "complex_rules", // TODO: Handle complex rules properly
+                                            "maxSummaryLength" to action.maxSummaryLength.toString(),
+                                            "includeOriginal" to action.includeOriginalContent.toString(),
+                                            "outputVar" to action.summaryOutputVariable
+                                        )
+                                    )
+                                    is MultiUserAction.AIAutoEmailSummarizer -> ActionConfig(
+                                        type = ActionType.AI_AUTO_EMAIL_SUMMARIZER,
+                                        displayName = "AI Auto Email Summarizer",
+                                        config = mapOf<String, String>(
+                                            "forwardToEmails" to action.forwardToEmails.joinToString(","),
+                                            "summaryStyle" to action.summaryStyle,
+                                            "maxSummaryLength" to action.maxSummaryLength.toString(),
+                                            "includeOriginalSubject" to action.includeOriginalSubject.toString(),
+                                            "summaryOutputVar" to action.summaryOutputVariable
                                         )
                                     )
                                     else -> null
@@ -1272,12 +1314,29 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
             )
         }
         ActionType.AI_24H_GALLERY_ANALYSIS -> {
+            // Get timeframe hours, convert to maxImages (rough estimation)
+            val timeFrameHours = config.config["timeFrameHours"]?.toIntOrNull() ?: 24
+            val estimatedMaxImages = (timeFrameHours * 2).coerceAtMost(100) // Estimate 2 images per hour, max 100
+            
+            // Get recipient info based on delivery method
+            val deliveryMethod = config.config["deliveryMethod"] ?: "gmail"
+            val recipientEmail = if (deliveryMethod == "gmail") {
+                config.config["recipientEmails"] ?: config.config["recipientEmail"] ?: ""
+            } else {
+                config.config["recipientEmail"] ?: ""
+            }
+            val telegramChatId = if (deliveryMethod == "telegram") {
+                config.config["telegramChatId"]?.toLongOrNull() ?: 0L
+            } else {
+                0L
+            }
+            
             MultiUserAction.AI24HourGalleryAnalysis(
-                searchKeyword = config.config["searchKeyword"] ?: "person",
-                deliveryMethod = config.config["deliveryMethod"] ?: "gmail",
-                recipientEmail = config.config["recipientEmail"] ?: "",
-                telegramChatId = config.config["telegramChatId"]?.toLongOrNull() ?: 0L,
-                maxImages = config.config["maxImages"]?.toIntOrNull() ?: 50,
+                searchKeyword = config.config["searchKeyword"] ?: "any", // No longer used but kept for compatibility
+                deliveryMethod = deliveryMethod,
+                recipientEmail = recipientEmail,
+                telegramChatId = telegramChatId,
+                maxImages = estimatedMaxImages,
                 analysisPrompt = config.config["analysisPrompt"] ?: "Analyze these images and provide a summary of what you see",
                 includeImagePaths = config.config["includeImagePaths"]?.toBooleanStrictOrNull() ?: false,
                 outputVariable = config.config["outputVar"] ?: "gallery_analysis_result"
@@ -2184,32 +2243,20 @@ fun ActionPickerDialog(
                                 )
                             }
                             item {
-                                ActionOptionCard(
-                                    title = "24H Gallery Analysis",
-                                    description = "Analyze previous 24 hours of gallery images with keyword filtering and send results via Gmail/Telegram",
-                                    icon = "📸🔍",
-                                    onClick = {
-                                        val keyword = actionConfig["searchKeyword"] ?: "person"
-                                        val delivery = actionConfig["deliveryMethod"] ?: "gmail"
-                                        onActionSelected(ActionConfig(
-                                            type = ActionType.AI_24H_GALLERY_ANALYSIS,
-                                            displayName = "24H Gallery Analysis: '$keyword' → $delivery",
-                                            config = actionConfig
-                                        ))
-                                    },
-                                    configurable = true,
+                                GalleryAnalysisActionCard(
                                     currentConfig = actionConfig,
                                     onConfigChange = { key, value ->
                                         actionConfig = actionConfig + (key to value)
                                     },
-                                    configFields = listOf(
-                                        "searchKeyword" to "Keyword to search for (e.g., person, car, text)",
-                                        "deliveryMethod" to "Delivery method (gmail/telegram)",
-                                        "recipientEmail" to "Email address (for Gmail)",
-                                        "telegramChatId" to "Telegram chat ID (for Telegram)",
-                                        "maxImages" to "Maximum images to process (default: 50)",
-                                        "analysisPrompt" to "Custom LLM analysis prompt"
-                                    )
+                                    onActionSelected = { config ->
+                                        val delivery = config["deliveryMethod"] ?: "gmail"
+                                        val timeFrame = config["timeFrameHours"] ?: "24"
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.AI_24H_GALLERY_ANALYSIS,
+                                            displayName = "Gallery Analysis: ${timeFrame}h → $delivery",
+                                            config = config
+                                        ))
+                                    }
                                 )
                             }
                             item {
@@ -3676,6 +3723,262 @@ fun generateTemplateTags(trigger: TriggerConfig, actions: List<ActionConfig>): L
     tags.add("Custom")
     
     return tags.toList()
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GalleryAnalysisActionCard(
+    currentConfig: Map<String, String>,
+    onConfigChange: (String, String) -> Unit,
+    onActionSelected: (Map<String, String>) -> Unit
+) {
+    var showConfig by remember { mutableStateOf(false) }
+    var timeFrameHours by remember { mutableStateOf(currentConfig["timeFrameHours"] ?: "24") }
+    var deliveryMethod by remember { mutableStateOf(currentConfig["deliveryMethod"] ?: "gmail") }
+    var recipientEmails by remember { mutableStateOf(currentConfig["recipientEmails"] ?: "") }
+    var telegramChatId by remember { mutableStateOf(currentConfig["telegramChatId"] ?: "") }
+    var analysisPrompt by remember { mutableStateOf(currentConfig["analysisPrompt"] ?: "Analyze these images and provide a summary of what you see") }
+    var expanded by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            // Header row
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showConfig = !showConfig },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "📸🔍",
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    
+                    Column {
+                        Text(
+                            text = "Gallery Analysis",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Analyze gallery images with AI and send results",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        
+                        // Show current config if set
+                        if (timeFrameHours.isNotEmpty() && analysisPrompt.isNotEmpty()) {
+                            Text(
+                                text = "⏱️ ${timeFrameHours}h analysis → $deliveryMethod",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+                
+                Icon(
+                    if (showConfig) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            if (showConfig) {
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Time Frame Configuration
+                OutlinedTextField(
+                    value = timeFrameHours,
+                    onValueChange = { 
+                        timeFrameHours = it
+                        onConfigChange("timeFrameHours", it)
+                    },
+                    label = { Text("Time Frame (hours)") },
+                    placeholder = { Text("24") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    leadingIcon = {
+                        Icon(Icons.Default.DateRange, contentDescription = null)
+                    }
+                )
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Delivery Method Dropdown
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = when (deliveryMethod) {
+                            "gmail" -> "Gmail"
+                            "telegram" -> "Telegram"
+                            else -> "Gmail"
+                        },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Delivery Method") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                        leadingIcon = {
+                            Icon(
+                                if (deliveryMethod == "gmail") Icons.Default.Email else Icons.Default.Send,
+                                contentDescription = null
+                            )
+                        }
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Gmail") },
+                            onClick = {
+                                deliveryMethod = "gmail"
+                                onConfigChange("deliveryMethod", "gmail")
+                                expanded = false
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Email, contentDescription = null)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Telegram") },
+                            onClick = {
+                                deliveryMethod = "telegram"
+                                onConfigChange("deliveryMethod", "telegram")
+                                expanded = false
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Send, contentDescription = null)
+                            }
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Dynamic Recipient Fields
+                if (deliveryMethod == "gmail") {
+                    OutlinedTextField(
+                        value = recipientEmails,
+                        onValueChange = { 
+                            recipientEmails = it
+                            onConfigChange("recipientEmails", it)
+                        },
+                        label = { Text("Gmail Recipients") },
+                        placeholder = { Text("user1@email.com, user2@email.com") },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = {
+                            Icon(Icons.Default.Email, contentDescription = null)
+                        },
+                        supportingText = {
+                            Text("Enter email addresses separated by commas")
+                        }
+                    )
+                } else if (deliveryMethod == "telegram") {
+                    OutlinedTextField(
+                        value = telegramChatId,
+                        onValueChange = { 
+                            telegramChatId = it
+                            onConfigChange("telegramChatId", it)
+                        },
+                        label = { Text("Telegram Chat ID") },
+                        placeholder = { Text("123456789") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        leadingIcon = {
+                            Icon(Icons.Default.Send, contentDescription = null)
+                        },
+                        supportingText = {
+                            Text("Enter your Telegram chat ID")
+                        }
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                // Custom Analysis Prompt
+                OutlinedTextField(
+                    value = analysisPrompt,
+                    onValueChange = { 
+                        analysisPrompt = it
+                        onConfigChange("analysisPrompt", it)
+                    },
+                    label = { Text("Analysis Prompt") },
+                    placeholder = { Text("if images is receipt then give me the total spending") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 5,
+                    leadingIcon = {
+                        Icon(Icons.Default.Create, contentDescription = null)
+                    },
+                    supportingText = {
+                        Text("Describe what analysis you want the AI to perform on the images")
+                    }
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Add Action Button
+                val canAddAction = timeFrameHours.isNotEmpty() && 
+                                 analysisPrompt.isNotEmpty() && 
+                                 ((deliveryMethod == "gmail" && recipientEmails.isNotEmpty()) ||
+                                  (deliveryMethod == "telegram" && telegramChatId.isNotEmpty()))
+                
+                Button(
+                    onClick = {
+                        val config = mutableMapOf<String, String>()
+                        config["timeFrameHours"] = timeFrameHours
+                        config["deliveryMethod"] = deliveryMethod
+                        config["analysisPrompt"] = analysisPrompt
+                        
+                        if (deliveryMethod == "gmail") {
+                            config["recipientEmails"] = recipientEmails
+                        } else if (deliveryMethod == "telegram") {
+                            config["telegramChatId"] = telegramChatId
+                        }
+                        
+                        // Set legacy fields for compatibility
+                        config["searchKeyword"] = "any" // Not used anymore, but kept for compatibility
+                        config["maxImages"] = "50" // Default value
+                        config["includeImagePaths"] = "false"
+                        config["outputVar"] = "gallery_analysis_result"
+                        
+                        onActionSelected(config)
+                    },
+                    enabled = canAddAction,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add Gallery Analysis Action")
+                }
+                
+                if (!canAddAction) {
+                    Text(
+                        text = "Please fill all fields to add this action",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        }
+    }
 }
 
 // Extension to WorkflowTemplate data class
