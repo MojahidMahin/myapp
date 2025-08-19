@@ -79,6 +79,102 @@ class ImageAnalysisService {
     }
     
     /**
+     * Simple image filtering for quick YES/NO decisions
+     * Much faster than comprehensive analysis - only extracts text and does basic checks
+     */
+    suspend fun filterImage(bitmap: Bitmap, filterQuestion: String): ImageFilterResult {
+        return withContext(Dispatchers.IO) {
+            try {
+                Log.d(TAG, "🔍 Starting simple image filtering...")
+                Log.d(TAG, "📸 Image: ${bitmap.width}x${bitmap.height}")
+                Log.d(TAG, "❓ Filter question: $filterQuestion")
+                
+                // Step 1: Quick OCR extraction (no heavy preprocessing)
+                val ocrResult = ocrService.extractTextFromImage(bitmap, usePreprocessing = false)
+                
+                // Step 2: Simple content-based filtering
+                val filterResponse = performSimpleFiltering(ocrResult.text, filterQuestion)
+                
+                Log.d(TAG, "🎯 Filter response: $filterResponse")
+                
+                ImageFilterResult(
+                    isRelevant = filterResponse.isRelevant,
+                    confidence = filterResponse.confidence,
+                    reasoning = filterResponse.reasoning,
+                    extractedText = ocrResult.text,
+                    success = true
+                )
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "💥 Error in image filtering", e)
+                ImageFilterResult(
+                    isRelevant = false,
+                    confidence = 0.0f,
+                    reasoning = "Filtering failed: ${e.message}",
+                    extractedText = "",
+                    success = false
+                )
+            }
+        }
+    }
+    
+    /**
+     * Perform simple rule-based filtering without LLM
+     */
+    private fun performSimpleFiltering(extractedText: String, filterQuestion: String): SimpleFilterResponse {
+        val text = extractedText.lowercase()
+        val question = filterQuestion.lowercase()
+        
+        return when {
+            // Receipt filtering
+            question.contains("receipt") -> {
+                val receiptIndicators = listOf(
+                    "receipt", "bill", "invoice", "total", "subtotal", "tax", 
+                    "$", "dollar", "price", "amount", "cost", "payment", 
+                    "visa", "mastercard", "cash", "change", "qty", "quantity"
+                )
+                
+                val socialMediaIndicators = listOf(
+                    "like", "comment", "share", "post", "facebook", "instagram", 
+                    "twitter", "updated", "profile", "notification", "message",
+                    "chat", "status", "story", "follow", "friend"
+                )
+                
+                val receiptScore = receiptIndicators.count { text.contains(it) }
+                val socialScore = socialMediaIndicators.count { text.contains(it) }
+                
+                val isReceipt = receiptScore >= 2 && socialScore == 0
+                val confidence = if (isReceipt) 0.9f else 0.1f
+                
+                val reasoning = if (isReceipt) {
+                    "YES - Found $receiptScore receipt indicators: ${receiptIndicators.filter { text.contains(it) }.take(3).joinToString(", ")}"
+                } else if (socialScore > 0) {
+                    "NO - Detected social media content: ${socialMediaIndicators.filter { text.contains(it) }.take(3).joinToString(", ")}"
+                } else {
+                    "NO - Insufficient receipt indicators (found $receiptScore, need 2+)"
+                }
+                
+                SimpleFilterResponse(isReceipt, confidence, reasoning)
+            }
+            
+            // Food filtering
+            question.contains("food") -> {
+                val foodIndicators = listOf("food", "meal", "dish", "restaurant", "menu", "eat", "cooking")
+                val foodScore = foodIndicators.count { text.contains(it) }
+                val isFood = foodScore >= 1
+                val confidence = if (isFood) 0.8f else 0.2f
+                val reasoning = if (isFood) "YES - Food related" else "NO - No food indicators"
+                SimpleFilterResponse(isFood, confidence, reasoning)
+            }
+            
+            // Default: conservative approach
+            else -> {
+                SimpleFilterResponse(false, 0.3f, "NO - Conservative filtering")
+            }
+        }
+    }
+    
+    /**
      * Analyze visual content characteristics
      */
     private fun analyzeVisualContent(bitmap: Bitmap): VisualAnalysis {
@@ -1481,4 +1577,18 @@ data class ColorAnalysis(
     val brightness: Float,
     val contrast: Float,
     val colorfulness: Float
+)
+
+data class ImageFilterResult(
+    val isRelevant: Boolean,
+    val confidence: Float,
+    val reasoning: String,
+    val extractedText: String,
+    val success: Boolean
+)
+
+data class SimpleFilterResponse(
+    val isRelevant: Boolean,
+    val confidence: Float,
+    val reasoning: String
 )

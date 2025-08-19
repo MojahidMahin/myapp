@@ -411,7 +411,7 @@ class GalleryAnalysisService @Inject constructor(
         // Phase 1: Quick filtering to identify relevant images
         Log.i(TAG, "🔍 PHASE 1: Quick filtering to identify relevant images")
         val relevantImages = mutableListOf<GalleryImage>()
-        val filteringResults = mutableListOf<ImageFilterResult>()
+        val filteringResults = mutableListOf<GalleryImageFilterResult>()
         
         for ((index, image) in images.withIndex()) {
             try {
@@ -419,28 +419,28 @@ class GalleryAnalysisService @Inject constructor(
                 
                 val bitmap = loadBitmapFromUri(image.uri)
                 if (bitmap != null) {
-                    // Create a filtering prompt that asks if the image matches the criteria
+                    // Use simple filtering instead of comprehensive analysis
                     val filteringPrompt = createFilteringPrompt(analysisPrompt)
                     
-                    val filterResult = imageAnalysisService.analyzeImage(
+                    val filterResult = imageAnalysisService.filterImage(
                         bitmap = bitmap,
-                        userQuestion = filteringPrompt
+                        filterQuestion = filteringPrompt
                     )
                     
-                    val isRelevant = isImageRelevant(filterResult.description, analysisPrompt)
+                    val isRelevant = filterResult.isRelevant
                     
-                    filteringResults.add(ImageFilterResult(
+                    filteringResults.add(GalleryImageFilterResult(
                         image = image,
                         isRelevant = isRelevant,
                         confidence = filterResult.confidence,
-                        filterDescription = filterResult.description
+                        filterDescription = filterResult.reasoning
                     ))
                     
                     if (isRelevant) {
                         relevantImages.add(image)
-                        Log.i(TAG, "✅ RELEVANT: ${image.name} - ${filterResult.description.take(50)}...")
+                        Log.i(TAG, "✅ RELEVANT: ${image.name} - ${filterResult.reasoning}")
                     } else {
-                        Log.d(TAG, "❌ Not relevant: ${image.name}")
+                        Log.d(TAG, "❌ Not relevant: ${image.name} - ${filterResult.reasoning}")
                     }
                 } else {
                     Log.w(TAG, "⚠️ Could not load bitmap for filtering: ${image.name}")
@@ -529,7 +529,7 @@ class GalleryAnalysisService @Inject constructor(
         return when {
             // Receipt detection
             lowercasePrompt.contains("receipt") -> 
-                "Is this image a receipt, bill, or invoice? Answer YES or NO and briefly explain what you see."
+                "Is this image a receipt, bill, or invoice with prices and totals? Answer YES only if you see monetary amounts, prices, or purchase details. Answer NO if it's a social media post, screenshot, or general photo. Be strict - only receipts with spending information should be YES."
                 
             // Food detection
             lowercasePrompt.contains("food") || lowercasePrompt.contains("meal") || lowercasePrompt.contains("dish") -> 
@@ -558,26 +558,47 @@ class GalleryAnalysisService @Inject constructor(
      */
     private fun isImageRelevant(filterDescription: String, originalPrompt: String): Boolean {
         val description = filterDescription.lowercase()
+        val lowercasePrompt = originalPrompt.lowercase()
         
-        // Look for positive indicators
-        val positiveIndicators = listOf(
-            "yes", "this is", "contains", "shows", "has", "displays", 
-            "visible", "present", "appears to be", "looks like"
-        )
-        
-        // Look for negative indicators
-        val negativeIndicators = listOf(
-            "no", "not", "doesn't", "does not", "cannot", "can't", 
-            "unable", "nothing", "none", "absent"
-        )
-        
-        // Check for explicit YES/NO answers first
+        // Check for explicit YES/NO answers first (most reliable)
         if (description.startsWith("yes") || description.contains(" yes ")) {
             return true
         }
         if (description.startsWith("no") || description.contains(" no ")) {
             return false
         }
+        
+        // Special handling for receipt detection - be extra strict
+        if (lowercasePrompt.contains("receipt")) {
+            // Look for receipt-specific positive indicators
+            val receiptPositiveIndicators = listOf(
+                "receipt", "bill", "invoice", "purchase", "total", "price", 
+                "amount", "cost", "payment", "transaction", "\$", "dollar"
+            )
+            
+            // Look for receipt-specific negative indicators  
+            val receiptNegativeIndicators = listOf(
+                "social media", "screenshot", "facebook", "instagram", "post",
+                "comment", "like", "share", "notification", "chat", "message"
+            )
+            
+            val receiptPositiveCount = receiptPositiveIndicators.count { description.contains(it) }
+            val receiptNegativeCount = receiptNegativeIndicators.count { description.contains(it) }
+            
+            // For receipts, require strong positive evidence and no negative evidence
+            return receiptPositiveCount >= 2 && receiptNegativeCount == 0
+        }
+        
+        // General relevance detection for other prompts
+        val positiveIndicators = listOf(
+            "this is", "contains", "shows", "has", "displays", 
+            "visible", "present", "appears to be", "looks like"
+        )
+        
+        val negativeIndicators = listOf(
+            "not", "doesn't", "does not", "cannot", "can't", 
+            "unable", "nothing", "none", "absent"
+        )
         
         // Score based on positive vs negative indicators
         val positiveScore = positiveIndicators.count { description.contains(it) }
@@ -782,6 +803,12 @@ class GalleryAnalysisService @Inject constructor(
             appendLine("📊 Images Found: ${images.size}")
             appendLine("🤖 Analysis Method: Local LLM")
             appendLine()
+            
+            // Add consolidated result first
+            if (consolidatedResult.isNotEmpty()) {
+                appendLine(consolidatedResult)
+                appendLine()
+            }
 
             if (analysisResults.isNotEmpty()) {
                 appendLine("🖼️ DETAILED ANALYSIS RESULTS:")
@@ -997,13 +1024,13 @@ data class SmartAnalysisResult(
     val filteredImages: List<GalleryImage>,
     val analysisResults: List<GalleryImageAnalysisResult>,
     val consolidatedResult: String,
-    val filteringResults: List<ImageFilterResult>
+    val filteringResults: List<GalleryImageFilterResult>
 )
 
 /**
  * Data class for image filtering results
  */
-data class ImageFilterResult(
+data class GalleryImageFilterResult(
     val image: GalleryImage,
     val isRelevant: Boolean,
     val confidence: Float,
