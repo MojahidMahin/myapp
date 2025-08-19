@@ -3,6 +3,9 @@ package com.localllm.myapplication.service.ai
 import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.framework.image.MPImage
+import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +25,7 @@ class MediaPipeLLMService(private val context: Context) {
         private const val DEFAULT_TEMPERATURE = 0.8f
         private const val DEFAULT_TOP_K = 40
         private const val DEFAULT_TOP_P = 0.95f
-        private const val MAX_IMAGE_COUNT = 4
+        private const val MAX_IMAGE_COUNT = 8
     }
     
     private var llmInference: LlmInference? = null
@@ -32,6 +35,7 @@ class MediaPipeLLMService(private val context: Context) {
     
     // Mutex to serialize access to the LLM session (MediaPipe can't handle concurrent requests)
     private val sessionMutex = Mutex()
+    
     
     suspend fun initialize(modelPath: String): Result<Unit> = withContext(Dispatchers.IO) {
         try {
@@ -50,26 +54,38 @@ class MediaPipeLLMService(private val context: Context) {
             llmSession?.close()
             llmInference?.close()
             
-            // Create MediaPipe LLM Inference options (like the working Gallery app)
+            // Create MediaPipe LLM Inference options with vision support
+            Log.d(TAG, "🔧 Configuring LLM options with vision support...")
+            Log.d(TAG, "   - Model path: $modelPath")
+            Log.d(TAG, "   - Max tokens: $MAX_TOKENS")
+            Log.d(TAG, "   - Max images: $MAX_IMAGE_COUNT")
+            Log.d(TAG, "   - Backend: GPU")
+            
             val options = LlmInference.LlmInferenceOptions.builder()
                 .setModelPath(modelPath)
                 .setMaxTokens(MAX_TOKENS)
                 .setPreferredBackend(LlmInference.Backend.GPU) // Try GPU first
-                .setMaxNumImages(MAX_IMAGE_COUNT)
+                .setMaxNumImages(MAX_IMAGE_COUNT) // Enable vision modality with higher limit
                 .build()
             
-            Log.d(TAG, "🔧 Creating LLM Inference instance...")
+            Log.d(TAG, "🔧 Creating LLM Inference instance with vision support...")
             // Create LLM Inference instance (this handles large model loading internally)
             llmInference = LlmInference.createFromOptions(context, options)
+            Log.d(TAG, "✅ LLM Inference instance created successfully")
             
-            Log.d(TAG, "🔧 Creating LLM Session...")
-            // Create session with proper parameters
+            Log.d(TAG, "🔧 Creating LLM Session with vision modality enabled...")
+            // Create session with GraphOptions for vision modality (like working Gallery app)
             llmSession = LlmInferenceSession.createFromOptions(
                 llmInference,
                 LlmInferenceSession.LlmInferenceSessionOptions.builder()
                     .setTopK(DEFAULT_TOP_K)
                     .setTopP(DEFAULT_TOP_P)
                     .setTemperature(DEFAULT_TEMPERATURE)
+                    .setGraphOptions(
+                        GraphOptions.builder()
+                            .setEnableVisionModality(true) // KEY: Enable vision modality in session
+                            .build()
+                    )
                     .build()
             )
             
@@ -99,16 +115,30 @@ class MediaPipeLLMService(private val context: Context) {
                 Log.d(TAG, "🔒 Acquired session lock for request")
                 shouldStop.set(false)
             
-            // Add text query
-            if (prompt.trim().isNotEmpty()) {
-                llmSession!!.addQueryChunk(prompt)
-                Log.d(TAG, "📝 Added query chunk to session")
+            // Prepare basic prompt - image handling will be done separately  
+            val enhancedPrompt = prompt
+            
+            // Add enhanced query to session
+            if (enhancedPrompt.trim().isNotEmpty()) {
+                llmSession!!.addQueryChunk(enhancedPrompt)
+                Log.d(TAG, "📝 Added enhanced query chunk to session (${enhancedPrompt.length} chars)")
+                Log.d(TAG, "📝 Query preview: ${enhancedPrompt.take(100)}...")
             }
             
-            // Add images if any (following Gallery app pattern)
-            for (image in images) {
-                // Convert Bitmap to MediaPipe Image format if needed
-                // For now, skip image support to focus on text generation
+            // Add images to session for multimodal support
+            if (images.isNotEmpty()) {
+                Log.d(TAG, "📸 Adding ${images.size} image(s) to LLM session for multimodal input")
+                for ((index, image) in images.withIndex()) {
+                    try {
+                        val mpImage: MPImage = BitmapImageBuilder(image).build()
+                        llmSession!!.addImage(mpImage)
+                        Log.d(TAG, "✅ Added image $index to session (${image.width}x${image.height})")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Failed to add image $index to session", e)
+                    }
+                }
+            } else {
+                Log.d(TAG, "📝 No images provided - text-only query")
             }
             
             // Use suspendCancellableCoroutine to properly wait for async response
@@ -116,14 +146,13 @@ class MediaPipeLLMService(private val context: Context) {
                 val responseBuilder = StringBuilder()
                 var hasDeliveredAnyContent = false
                 
-                Log.d(TAG, "🚀 Starting async generation...")
-                llmSession!!.generateResponseAsync { partialResult, done ->
+                // Common response handler
+                val responseHandler = { partialResult: String?, done: Boolean ->
                     if (shouldStop.get()) {
                         if (continuation.isActive) {
                             continuation.resume("Generation cancelled")
                         }
-                        return@generateResponseAsync
-                    }
+                    } else {
                     
                     partialResult?.let { result ->
                         if (result.isNotBlank()) {
@@ -155,7 +184,12 @@ class MediaPipeLLMService(private val context: Context) {
                             continuation.resume(response)
                         }
                     }
+                    }
                 }
+                
+                Log.d(TAG, "🚀 Starting async generation...")
+                // Generate response using standard MediaPipe API
+                llmSession!!.generateResponseAsync(responseHandler)
                 
                 // Handle cancellation
                 continuation.invokeOnCancellation {
@@ -197,6 +231,11 @@ class MediaPipeLLMService(private val context: Context) {
                         .setTopK(DEFAULT_TOP_K)
                         .setTopP(DEFAULT_TOP_P)
                         .setTemperature(DEFAULT_TEMPERATURE)
+                        .setGraphOptions(
+                            GraphOptions.builder()
+                                .setEnableVisionModality(true) // Enable vision modality in reset session too
+                                .build()
+                        )
                         .build()
                 )
                 
@@ -233,4 +272,5 @@ class MediaPipeLLMService(private val context: Context) {
     }
     
     fun isModelLoaded(): Boolean = isInitialized && llmInference != null && llmSession != null
+    
 }
