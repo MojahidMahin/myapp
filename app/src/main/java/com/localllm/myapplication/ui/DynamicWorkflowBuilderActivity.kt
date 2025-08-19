@@ -981,6 +981,7 @@ enum class ActionType {
     AI_SMART_SUMMARIZE_AND_FORWARD, // New Zapier-like smart action
     AI_AUTO_EMAIL_SUMMARIZER, // Simple auto email summarizer
     AI_24H_GALLERY_ANALYSIS, // 24-hour gallery analysis with keyword filtering and LLM processing
+    AI_IMAGE_WORKFLOW_ORCHESTRATOR, // Natural language image workflow processing
     DELAY,
     CONDITIONAL
 }
@@ -1342,6 +1343,15 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
                 outputVariable = config.config["outputVar"] ?: "gallery_analysis_result"
             )
         }
+        ActionType.AI_IMAGE_WORKFLOW_ORCHESTRATOR -> MultiUserAction.AIImageWorkflowOrchestrator(
+            instruction = config.config["instruction"] ?: "Find all receipts from last week and calculate total spending",
+            attachedImageUri = config.config["attachedImageUri"],
+            outputFormat = config.config["outputFormat"] ?: "json",
+            deliveryMethod = config.config["deliveryMethod"],
+            recipientEmails = config.config["recipientEmails"] ?: "",
+            telegramChatId = config.config["telegramChatId"] ?: "",
+            notificationTitle = config.config["notificationTitle"] ?: "Workflow Result"
+        )
         ActionType.DELAY -> MultiUserAction.DelayAction(
             delayMinutes = config.config["delayMinutes"]?.toIntOrNull() ?: 5
         )
@@ -2261,6 +2271,36 @@ fun ActionPickerDialog(
                             }
                             item {
                                 ActionOptionCard(
+                                    title = "🎬 Image Workflow Orchestrator",
+                                    description = "Process natural language instructions for image workflows (find receipts, calculate spending, etc.)",
+                                    icon = "🎬",
+                                    onClick = {
+                                        val instruction = actionConfig["instruction"] ?: "Find all receipts from last week and calculate total spending"
+                                        val displayName = "Workflow: \"${instruction.take(30)}${if (instruction.length > 30) "..." else ""}\""
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.AI_IMAGE_WORKFLOW_ORCHESTRATOR,
+                                            displayName = displayName,
+                                            config = actionConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = actionConfig,
+                                    onConfigChange = { key, value ->
+                                        actionConfig = actionConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "instruction" to "Natural language instruction",
+                                        "attachedImageUri" to "Attached Image URI (optional)",
+                                        "outputFormat" to "Output format (json, text, summary)",
+                                        "deliveryMethod" to "Delivery method (email, telegram, notification)",
+                                        "recipientEmails" to "Recipient emails (comma-separated)",
+                                        "telegramChatId" to "Telegram chat ID (for telegram delivery)",
+                                        "notificationTitle" to "Notification title (for notification delivery)"
+                                    )
+                                )
+                            }
+                            item {
+                                ActionOptionCard(
                                     title = "Auto Email Summarizer",
                                     description = "Automatically summarize triggered emails and forward to specified addresses",
                                     icon = "📧🤖",
@@ -2826,6 +2866,7 @@ fun ActionPreview(
                 ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> "🤖📝"
                 ActionType.AI_AUTO_EMAIL_SUMMARIZER -> "📧🤖"
                 ActionType.AI_24H_GALLERY_ANALYSIS -> "📸🔍"
+                ActionType.AI_IMAGE_WORKFLOW_ORCHESTRATOR -> "🎬"
                 ActionType.DELAY -> "⏱️"
                 ActionType.CONDITIONAL -> "🔀"
             }
@@ -2866,6 +2907,7 @@ fun ActionPreview(
                         ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> "Smart summarize and forward with AI"
                         ActionType.AI_AUTO_EMAIL_SUMMARIZER -> "Auto-summarize and forward emails"
                         ActionType.AI_24H_GALLERY_ANALYSIS -> "Analyze previous 24h gallery images with keyword search"
+                        ActionType.AI_IMAGE_WORKFLOW_ORCHESTRATOR -> "Process natural language instructions for image workflows"
                         ActionType.DELAY -> "Wait before next action"
                         ActionType.CONDITIONAL -> "Execute conditionally"
                     },
@@ -3683,7 +3725,7 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
                 platforms.add(WorkflowPlatform.TELEGRAM)
             }
             ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY, 
-            ActionType.AI_SMART_SUMMARIZE_AND_FORWARD, ActionType.AI_AUTO_EMAIL_SUMMARIZER, ActionType.AI_24H_GALLERY_ANALYSIS -> {
+            ActionType.AI_SMART_SUMMARIZE_AND_FORWARD, ActionType.AI_AUTO_EMAIL_SUMMARIZER, ActionType.AI_24H_GALLERY_ANALYSIS, ActionType.AI_IMAGE_WORKFLOW_ORCHESTRATOR -> {
                 platforms.add(WorkflowPlatform.AI)
             }
             else -> {}

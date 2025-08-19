@@ -9,7 +9,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -219,10 +221,10 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
         modifier = Modifier.fillMaxSize()
     ) {
         TopAppBar(
-            title = { Text("Workflow Manager") },
+            title = { Text("Workflow Manager", color = Color.White) },
             navigationIcon = {
                 IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
                 }
             },
             actions = {
@@ -232,7 +234,7 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
                         context.startActivity(intent)
                     }
                 ) {
-                    Icon(Icons.Default.Info, contentDescription = "Monitor")
+                    Icon(Icons.Default.Info, contentDescription = "Monitor", tint = Color.White)
                 }
             }
         )
@@ -241,7 +243,7 @@ private fun WorkflowManagerScreen(onNavigateBack: () -> Unit) {
         TabRow(selectedTabIndex = selectedTab) {
             tabs.forEachIndexed { index, title ->
                 Tab(
-                    text = { Text(title) },
+                    text = { Text(title, color = Color.White) },
                     selected = selectedTab == index,
                     onClick = { selectedTab = index }
                 )
@@ -408,12 +410,14 @@ private fun WorkflowsTab() {
                 ) {
                     Text(
                         text = "⚙️ Workflow Automation",
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.titleLarge,
+                        color = Color.White
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Create and manage automated workflows for your AI tasks with Gmail integration",
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White
                     )
                 }
             }
@@ -423,7 +427,8 @@ private fun WorkflowsTab() {
             Text(
                 text = "Available Workflows",
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(vertical = 8.dp)
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = Color.White
             )
         }
         
@@ -456,12 +461,14 @@ private fun WorkflowsTab() {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
                         text = "Create New Workflow",
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Create automated workflows between Gmail and Telegram with AI assistance",
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White
                     )
                     ModernSpacing()
                     ModernPrimaryButton(
@@ -537,7 +544,7 @@ private fun GmailTab(
                             text = "Gmail Integration",
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = Color.White
                         )
                         ModernSmallSpacing()
                         
@@ -564,7 +571,7 @@ private fun GmailTab(
                                     Text(
                                         text = gmailAccount,
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = Color.White.copy(alpha = 0.7f)
                                     )
                                 }
                             } else {
@@ -581,19 +588,81 @@ private fun GmailTab(
                 
                 ModernSpacing()
                 
-                // Modern action buttons
-                if (gmailSignedIn) {
-                    ModernDangerButton(
-                        text = "Sign Out",
-                        onClick = onSignOut,
-                        modifier = Modifier.height(48.dp)
-                    )
-                } else {
-                    ModernSuccessButton(
-                        text = "Connect Gmail Account",
-                        onClick = onSignIn,
-                        modifier = Modifier.height(48.dp)
-                    )
+                // Responsive horizontal scrolling action buttons
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp)
+                ) {
+                    if (gmailSignedIn) {
+                        items(listOf(
+                            "Sign Out" to onSignOut,
+                            "Refresh Emails" to onRefreshEmails,
+                            "Quick Settings" to { /* Add quick settings action */ },
+                            "Clear Filters" to { onFilterKeywordsChanged(""); onFilterTypeChanged("all") }
+                        )) { (text, action) ->
+                            when (text) {
+                                "Sign Out" -> ModernDangerButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 140.dp)
+                                )
+                                "Refresh Emails" -> ModernPrimaryButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 140.dp)
+                                )
+                                "Quick Settings" -> ModernSecondaryButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 140.dp)
+                                )
+                                "Clear Filters" -> ModernWarningButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 140.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        items(listOf(
+                            "Connect Gmail Account" to onSignIn,
+                            "Help & Support" to { /* Add help action */ },
+                            "Setup Guide" to { /* Add setup guide action */ }
+                        )) { (text, action) ->
+                            when (text) {
+                                "Connect Gmail Account" -> ModernSuccessButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 160.dp)
+                                )
+                                "Help & Support" -> ModernSecondaryButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 140.dp)
+                                )
+                                "Setup Guide" -> ModernPrimaryButton(
+                                    text = text,
+                                    onClick = action,
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .widthIn(min = 140.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -612,14 +681,14 @@ private fun GmailTab(
                                 text = "Email Management",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = Color.White
                             )
                             ModernSmallSpacing()
                             Text(
                                 text = if (emails.isEmpty()) "No emails loaded" 
                                       else "${emails.size} emails found",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = Color.White.copy(alpha = 0.7f)
                             )
                         }
                         
@@ -675,7 +744,7 @@ private fun GmailTab(
                                 text = "Email Settings",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = Color.White
                             )
                         }
                         
@@ -692,12 +761,12 @@ private fun GmailTab(
                                     text = "Emails to fetch",
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = Color.White
                                 )
                                 Text(
                                     text = "Number of recent emails to load",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = Color.White.copy(alpha = 0.7f)
                                 )
                             }
                             
@@ -740,7 +809,7 @@ private fun GmailTab(
                                     text = "Email Filters",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = Color.White
                                 )
                             }
                             
@@ -1010,7 +1079,8 @@ private fun SettingsTab(
         Text(
             text = "Gmail Settings",
             style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold
+            fontWeight = FontWeight.Bold,
+            color = Color.White
         )
         
         // Gmail Account Settings
@@ -1023,14 +1093,16 @@ private fun SettingsTab(
                 Text(
                     text = "Account Management",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 
                 if (gmailSignedIn && gmailAccount != null) {
                     Text(
                         text = "Current account: $gmailAccount",
-                        style = MaterialTheme.typography.bodyMedium
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Button(
@@ -1045,13 +1117,13 @@ private fun SettingsTab(
                     Text(
                         text = "No Gmail account connected",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = Color.White.copy(alpha = 0.7f)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "Sign in to Gmail from the Gmail tab to manage your account",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = Color.White.copy(alpha = 0.7f)
                     )
                 }
             }
@@ -1067,12 +1139,14 @@ private fun SettingsTab(
                 Text(
                     text = "Workflow Settings",
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Configure automatic email processing and AI analysis settings",
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedButton(
@@ -1130,7 +1204,7 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
                             text = email.subject.ifEmpty { "No Subject" },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = if (!email.isRead) FontWeight.Bold else FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            color = Color.White,
                             maxLines = 2,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
@@ -1152,7 +1226,7 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
                         Text(
                             text = email.from.take(50) + if (email.from.length > 50) "..." else "",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = Color.White.copy(alpha = 0.7f),
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
@@ -1164,7 +1238,7 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
                     Text(
                         text = email.body.take(120) + if (email.body.length > 120) "..." else "",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color.White.copy(alpha = 0.7f),
                         maxLines = 2,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                         lineHeight = 18.sp
@@ -1187,7 +1261,7 @@ private fun EmailCard(email: GmailIntegrationService.EmailMessage) {
                             text = java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault())
                                 .format(java.util.Date(email.timestamp)),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = Color.White.copy(alpha = 0.7f)
                         )
                     }
                 }
@@ -1288,13 +1362,13 @@ private fun WorkflowsList() {
             Text(
                 text = "🤖 No workflows created yet",
                 style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color.White
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Create your first workflow to automate tasks between Gmail and Telegram!",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = Color.White.copy(alpha = 0.7f)
             )
             Spacer(modifier = Modifier.height(16.dp))
             Button(
@@ -1438,13 +1512,14 @@ private fun WorkflowCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = workflow.name,
-                        style = MaterialTheme.typography.titleMedium
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color.White
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = workflow.description,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = Color.White.copy(alpha = 0.7f)
                     )
                 }
                 

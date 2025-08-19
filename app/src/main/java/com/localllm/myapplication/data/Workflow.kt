@@ -440,6 +440,20 @@ sealed class MultiUserAction {
         val outputVariable: String = "gallery_analysis_result"
     ) : MultiUserAction()
     
+    /**
+     * Image Workflow Orchestrator - Processes natural language instructions for image workflows
+     * Supports dynamic time ranges, filtering conditions, and various actions on gallery images
+     */
+    data class AIImageWorkflowOrchestrator(
+        val instruction: String, // Natural language instruction (e.g., "Find all receipts from last week and calculate total spending")
+        val attachedImageUri: String? = null, // Optional image from gallery for similarity matching
+        val outputFormat: String = "json", // "json", "text", or "summary"
+        val deliveryMethod: String? = null, // "email", "telegram", or "notification"
+        val recipientEmails: String = "", // Comma-separated email addresses for email delivery
+        val telegramChatId: String = "", // Telegram chat ID for telegram delivery
+        val notificationTitle: String = "" // Notification title for notification delivery
+    ) : MultiUserAction()
+    
     // Approval and workflow control
     data class RequireApproval(
         val approverUserId: String,

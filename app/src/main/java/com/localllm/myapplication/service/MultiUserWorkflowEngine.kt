@@ -231,6 +231,7 @@ class MultiUserWorkflowEngine(
                 is MultiUserAction.AISmartSummarizeAndForward -> executeSmartSummarizeAndForward(action, context)
                 is MultiUserAction.AIAutoEmailSummarizer -> executeAutoEmailSummarizer(action, context)
                 is MultiUserAction.AI24HourGalleryAnalysis -> execute24HourGalleryAnalysis(action, context)
+                is MultiUserAction.AIImageWorkflowOrchestrator -> executeImageWorkflowOrchestrator(action, context)
                 
                 // Image Analysis Actions
                 is MultiUserAction.AIImageAnalysisAction -> executeImageAnalysisAction(action, context)
@@ -2211,6 +2212,151 @@ class MultiUserWorkflowEngine(
         } catch (e: Exception) {
             Log.e(TAG, "💥 Error in 24-hour gallery analysis execution", e)
             Result.failure(e)
+        }
+    }
+    
+    /**
+     * Execute Image Workflow Orchestrator action
+     */
+    private suspend fun executeImageWorkflowOrchestrator(
+        action: MultiUserAction.AIImageWorkflowOrchestrator,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.i(TAG, "🎬 === EXECUTING IMAGE WORKFLOW ORCHESTRATOR ===")
+            Log.d(TAG, "Instruction: '${action.instruction}'")
+            Log.d(TAG, "Attached image URI: ${action.attachedImageUri}")
+            Log.d(TAG, "Output format: ${action.outputFormat}")
+            Log.d(TAG, "Delivery method: ${action.deliveryMethod}")
+            
+            // Create the orchestrator
+            val orchestrator = ImageWorkflowOrchestrator(this.context)
+            
+            // Process variables in instruction
+            val processedInstruction = replaceVariables(action.instruction, context.variables)
+            Log.d(TAG, "Processed instruction: '$processedInstruction'")
+            
+            // Parse attached image URI if provided
+            val referenceImageUri = action.attachedImageUri?.let { uri ->
+                if (uri.startsWith("{{") && uri.endsWith("}}")) {
+                    val variableName = uri.substring(2, uri.length - 2)
+                    context.variables[variableName]?.let { android.net.Uri.parse(it) }
+                } else {
+                    android.net.Uri.parse(uri)
+                }
+            }
+            
+            // Execute the workflow instruction
+            val workflowResult = orchestrator.processWorkflowInstruction(
+                instruction = processedInstruction,
+                referenceImageUri = referenceImageUri
+            )
+            
+            workflowResult.fold(
+                onSuccess = { result ->
+                    Log.i(TAG, "✅ Image workflow orchestrator completed successfully")
+                    Log.d(TAG, "Images checked: ${result.imagesChecked}")
+                    Log.d(TAG, "Images matched: ${result.imagesMatched}")
+                    Log.d(TAG, "Action: ${result.action}")
+                    
+                    // Store result in context variables using default variable name
+                    val defaultVarName = "workflow_result"
+                    when (action.outputFormat.lowercase()) {
+                        "json" -> {
+                            context.variables[defaultVarName] = orchestrator.formatResultAsJson(result)
+                        }
+                        "text" -> {
+                            context.variables[defaultVarName] = orchestrator.formatResultAsHumanReadable(result)
+                        }
+                        "summary" -> {
+                            context.variables[defaultVarName] = orchestrator.formatResultAsHumanReadable(result)
+                        }
+                        else -> {
+                            context.variables[defaultVarName] = orchestrator.formatResultAsJson(result)
+                        }
+                    }
+                    
+                    // Store individual result components as variables
+                    context.variables["${defaultVarName}_images_checked"] = result.imagesChecked.toString()
+                    context.variables["${defaultVarName}_images_matched"] = result.imagesMatched.toString()
+                    context.variables["${defaultVarName}_action"] = result.action
+                    context.variables["${defaultVarName}_time_start"] = result.timeRange.start
+                    context.variables["${defaultVarName}_time_end"] = result.timeRange.end
+                    
+                    // Handle delivery if specified
+                    if (!action.deliveryMethod.isNullOrBlank()) {
+                        handleWorkflowResultDelivery(action, result, orchestrator, context)
+                    }
+                    
+                    Result.success("Workflow orchestrator processed '${result.action}' action: Found ${result.imagesMatched} matching images out of ${result.imagesChecked} checked")
+                },
+                onFailure = { error ->
+                    Log.e(TAG, "❌ Image workflow orchestrator failed: ${error.message}")
+                    context.variables["workflow_result_error"] = error.message ?: "Unknown error"
+                    Result.failure(error)
+                }
+            )
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 Error in image workflow orchestrator execution", e)
+            Result.failure(e)
+        }
+    }
+    
+    /**
+     * Handle delivery of workflow results
+     */
+    private suspend fun handleWorkflowResultDelivery(
+        action: MultiUserAction.AIImageWorkflowOrchestrator,
+        result: WorkflowResult,
+        orchestrator: ImageWorkflowOrchestrator,
+        context: WorkflowExecutionContext
+    ) {
+        try {
+            val resultContent = when (action.outputFormat.lowercase()) {
+                "json" -> orchestrator.formatResultAsJson(result)
+                "text" -> orchestrator.formatResultAsHumanReadable(result)
+                "summary" -> orchestrator.formatResultAsHumanReadable(result)
+                else -> orchestrator.formatResultAsHumanReadable(result)
+            }
+            
+            when (action.deliveryMethod?.lowercase()) {
+                "email" -> {
+                    if (action.recipientEmails.isNotBlank()) {
+                        val gmailService = userManager.getGmailService(context.triggerUserId)
+                        gmailService?.sendEmail(
+                            to = action.recipientEmails,
+                            subject = "Image Workflow Result: ${result.action}",
+                            body = resultContent,
+                            isHtml = false
+                        )?.fold(
+                            onSuccess = { Log.d(TAG, "Workflow result sent via email") },
+                            onFailure = { Log.w(TAG, "Failed to send workflow result via email: ${it.message}") }
+                        )
+                    }
+                }
+                "telegram" -> {
+                    if (action.telegramChatId.isNotBlank()) {
+                        val telegramService = userManager.getTelegramService(context.triggerUserId)
+                        telegramService?.sendMessage(
+                            chatId = action.telegramChatId.toLongOrNull() ?: 0L,
+                            text = resultContent
+                        )?.fold(
+                            onSuccess = { Log.d(TAG, "Workflow result sent via Telegram") },
+                            onFailure = { Log.w(TAG, "Failed to send workflow result via Telegram: ${it.message}") }
+                        )
+                    }
+                }
+                "notification" -> {
+                    val notificationService = NotificationService(this.context)
+                    notificationService.showWorkflowNotification(
+                        title = action.notificationTitle.ifBlank { "Image Workflow Result" },
+                        message = resultContent.take(200) + if (resultContent.length > 200) "..." else ""
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to deliver workflow result: ${e.message}")
         }
     }
 }

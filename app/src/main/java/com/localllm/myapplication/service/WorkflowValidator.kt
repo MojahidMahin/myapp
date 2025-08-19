@@ -610,6 +610,18 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.AIBatchImageAnalysisAction -> {
                     validateAIBatchImageAnalysisAction(action, index, errors, warnings)
                 }
+                is MultiUserAction.AIImageWorkflowOrchestrator -> {
+                    // Validate image workflow orchestrator action
+                    if (action.instruction.isBlank()) {
+                        errors.add(
+                            ValidationError(
+                                "EMPTY_WORKFLOW_INSTRUCTION",
+                                "AI Image Workflow Orchestrator at index $index has empty instruction",
+                                suggestedFix = "Provide a valid workflow instruction"
+                            )
+                        )
+                    }
+                }
                 is MultiUserAction.AIImageComparisonAction -> {
                     validateAIImageComparisonAction(action, index, errors, warnings)
                 }
@@ -691,6 +703,10 @@ class WorkflowValidator(private val context: Context) {
                 }
                 is MultiUserAction.AIBatchImageAnalysisAction -> {
                     definedVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AIImageWorkflowOrchestrator -> {
+                    extractVariables(action.instruction, usedVariables)
+                    // No outputVariable field - results are stored in default variables
                 }
                 is MultiUserAction.AIImageComparisonAction -> {
                     definedVariables.add(action.outputVariable)
@@ -823,6 +839,9 @@ class WorkflowValidator(private val context: Context) {
                 }
                 is MultiUserAction.AIBatchImageAnalysisAction -> {
                     aiOutputVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AIImageWorkflowOrchestrator -> {
+                    // No outputVariable field - results are stored in default variables
                 }
                 is MultiUserAction.AIImageComparisonAction -> {
                     aiOutputVariables.add(action.outputVariable)

@@ -29,7 +29,8 @@
       "Bash(cp:*)",
       "Bash(gradle:*)",
       "Bash(cd:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "defaultMode": "acceptEdits",
