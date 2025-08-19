@@ -25,15 +25,11 @@ fun TimeBasedImageAnalysisTriggerComposer(
     modifier: Modifier = Modifier
 ) {
     
-    // Form state - simplified to only essential fields
-    var triggerName by remember { mutableStateOf("") }
-    
-    // Time scheduling state
+    // ONLY time and schedule type - nothing else
     var scheduleType by remember { mutableStateOf(TimeScheduleType.DAILY) }
     var selectedHour by remember { mutableStateOf(9) }
     var selectedMinute by remember { mutableStateOf(30) }
     var selectedDays by remember { mutableStateOf(DayOfWeek.values().toList()) }
-    var isRecurring by remember { mutableStateOf(true) }
     
     // Time picker state
     var showTimePicker by remember { mutableStateOf(false) }
@@ -50,24 +46,9 @@ fun TimeBasedImageAnalysisTriggerComposer(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                text = "⏰ Time-Based Image Analysis Trigger",
+                text = "⏰ Schedule",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
-            )
-            
-            Text(
-                text = "Automatically analyze images at specific times",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            
-            // Basic Configuration
-            OutlinedTextField(
-                value = triggerName,
-                onValueChange = { triggerName = it },
-                label = { Text("Trigger Name") },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("e.g., 'Daily morning image analysis'") }
             )
             
             // Time Scheduling Configuration
@@ -238,109 +219,48 @@ fun TimeBasedImageAnalysisTriggerComposer(
                                 }
                             }
                             
-                            // Recurring option
-                            if (scheduleType != TimeScheduleType.ONCE) {
-                                Spacer(modifier = Modifier.height(12.dp))
-                                
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Checkbox(
-                                        checked = isRecurring,
-                                        onCheckedChange = { isRecurring = it }
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "Repeat this schedule",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
                         }
                     }
                 }
             }
             
-            
-            // Schedule Preview
-            if (triggerName.isNotBlank()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Schedule Preview",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                        }
-                        
-                        Spacer(modifier = Modifier.height(8.dp))
-                        
-                        Text(
-                            text = generateSchedulePreview(scheduleType, selectedHour, selectedMinute, selectedDays, isRecurring),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
-            }
             
             // Create Trigger Button
             Button(
                 onClick = {
-                    if (triggerName.isNotBlank()) {
-                        val timeSchedule = ImageAnalysisTimeSchedule(
-                            scheduleType = scheduleType,
-                            timeOfDay = String.format("%02d:%02d", selectedHour, selectedMinute),
-                            daysOfWeek = selectedDays,
-                            isRecurring = isRecurring
-                        )
-                        
-                        val trigger = MultiUserTrigger.TimeBasedImageAnalysisTrigger(
-                            userId = "current_user", // This should be filled by the calling component
-                            triggerName = triggerName,
-                            timeSchedule = timeSchedule,
-                            imageAttachments = emptyList(), // No image attachments needed
-                            analysisQuestions = emptyList(), // No custom questions
-                            analysisKeywords = emptyList(), // No keyword filtering
-                            analysisType = ImageAnalysisType.COMPREHENSIVE, // Default to comprehensive
-                            triggerOnKeywordMatch = false, // No keyword matching
-                            minimumConfidence = 0.5f, // Default confidence
-                            enableOCR = true, // Default OCR enabled
-                            enableObjectDetection = true, // Default object detection enabled
-                            enablePeopleDetection = true, // Default people detection enabled
-                            timezone = "UTC" // Default timezone
-                        )
-                        
-                        onTriggerCreated(trigger)
-                    }
+                    val timeSchedule = ImageAnalysisTimeSchedule(
+                        scheduleType = scheduleType,
+                        timeOfDay = String.format("%02d:%02d", selectedHour, selectedMinute),
+                        daysOfWeek = selectedDays,
+                        isRecurring = true
+                    )
+                    
+                    val trigger = MultiUserTrigger.TimeBasedImageAnalysisTrigger(
+                        userId = "current_user",
+                        triggerName = "Schedule ${String.format("%02d:%02d", selectedHour, selectedMinute)}",
+                        timeSchedule = timeSchedule,
+                        imageAttachments = emptyList(),
+                        analysisQuestions = emptyList(),
+                        analysisKeywords = emptyList(),
+                        analysisType = ImageAnalysisType.COMPREHENSIVE,
+                        triggerOnKeywordMatch = false,
+                        minimumConfidence = 0.5f,
+                        enableOCR = true,
+                        enableObjectDetection = true,
+                        enablePeopleDetection = true,
+                        timezone = "UTC"
+                    )
+                    
+                    onTriggerCreated(trigger)
                 },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = triggerName.isNotBlank()
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = null
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Create Time-Based Trigger")
+                Text("Create Schedule")
             }
         }
     }

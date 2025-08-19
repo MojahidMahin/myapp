@@ -596,6 +596,7 @@ class WorkflowValidator(private val context: Context) {
                 is MultiUserAction.AISmartReply,
                 is MultiUserAction.AISmartSummarizeAndForward,
                 is MultiUserAction.AIAutoEmailSummarizer,
+                is MultiUserAction.AI24HourGalleryAnalysis,
                 is MultiUserAction.RequireApproval,
                 is MultiUserAction.LogAction,
                 is MultiUserAction.NotificationAction -> {
@@ -729,6 +730,10 @@ class WorkflowValidator(private val context: Context) {
                     // Uses email data from trigger context, no variables to extract from action
                     definedVariables.add(action.summaryOutputVariable)
                 }
+                is MultiUserAction.AI24HourGalleryAnalysis -> {
+                    // Uses gallery images, no variables to extract from action
+                    definedVariables.add(action.outputVariable)
+                }
                 // Other action types that don't have text to extract
                 is MultiUserAction.ReplyToUserGmail,
                 is MultiUserAction.ForwardUserGmail,
@@ -820,6 +825,9 @@ class WorkflowValidator(private val context: Context) {
                     aiOutputVariables.add(action.outputVariable)
                 }
                 is MultiUserAction.AIImageComparisonAction -> {
+                    aiOutputVariables.add(action.outputVariable)
+                }
+                is MultiUserAction.AI24HourGalleryAnalysis -> {
                     aiOutputVariables.add(action.outputVariable)
                 }
                 is MultiUserAction.ConditionalAction -> conditionalActions.add(action)

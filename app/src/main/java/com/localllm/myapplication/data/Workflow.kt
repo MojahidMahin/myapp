@@ -425,6 +425,21 @@ sealed class MultiUserAction {
         val summaryOutputVariable: String = "email_summary"
     ) : MultiUserAction()
     
+    /**
+     * 24-Hour Gallery Analysis - Analyzes previous 24 hours of gallery images
+     * with keyword filtering and LLM processing, then sends results via Gmail/Telegram
+     */
+    data class AI24HourGalleryAnalysis(
+        val searchKeyword: String, // Keyword to search for in images (e.g., "person", "car", "text")
+        val deliveryMethod: String = "gmail", // "gmail" or "telegram" 
+        val recipientEmail: String = "", // For Gmail delivery
+        val telegramChatId: Long = 0L, // For Telegram delivery
+        val maxImages: Int = 50, // Maximum images to process
+        val analysisPrompt: String = "Analyze these images and provide a summary of what you see", // Custom LLM prompt
+        val includeImagePaths: Boolean = false, // Whether to include file paths in results
+        val outputVariable: String = "gallery_analysis_result"
+    ) : MultiUserAction()
+    
     // Approval and workflow control
     data class RequireApproval(
         val approverUserId: String,

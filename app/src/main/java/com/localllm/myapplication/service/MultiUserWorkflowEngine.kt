@@ -229,6 +229,7 @@ class MultiUserWorkflowEngine(
                 is MultiUserAction.AISmartReply -> aiProcessor.processSmartReply(action, context)
                 is MultiUserAction.AISmartSummarizeAndForward -> executeSmartSummarizeAndForward(action, context)
                 is MultiUserAction.AIAutoEmailSummarizer -> executeAutoEmailSummarizer(action, context)
+                is MultiUserAction.AI24HourGalleryAnalysis -> execute24HourGalleryAnalysis(action, context)
                 
                 // Image Analysis Actions
                 is MultiUserAction.AIImageAnalysisAction -> executeImageAnalysisAction(action, context)
@@ -2159,6 +2160,56 @@ class MultiUserWorkflowEngine(
         
         val commonColors = colors1.intersect(colors2.toSet())
         return commonColors.size.toFloat() / maxOf(colors1.size, colors2.size)
+    }
+    
+    /**
+     * Execute 24-Hour Gallery Analysis Action
+     */
+    private suspend fun execute24HourGalleryAnalysis(
+        action: MultiUserAction.AI24HourGalleryAnalysis,
+        context: WorkflowExecutionContext
+    ): Result<String> {
+        return try {
+            Log.i(TAG, "📸 === EXECUTING 24-HOUR GALLERY ANALYSIS ===")
+            Log.d(TAG, "Search keyword: '${action.searchKeyword}'")
+            Log.d(TAG, "Delivery method: ${action.deliveryMethod}")
+            Log.d(TAG, "Max images: ${action.maxImages}")
+            
+            // Create services
+            val gmailService = GmailIntegrationService()
+            val telegramService = TelegramBotService(this.context)
+            val imageAnalysisService = ImageAnalysisService()
+            
+            // Create gallery analysis service
+            val galleryAnalysisService = GalleryAnalysisService(
+                context = this.context,
+                aiProcessingFacade = aiProcessor,
+                gmailService = gmailService,
+                telegramService = telegramService,
+                imageAnalysisService = imageAnalysisService
+            )
+            
+            // Execute the analysis
+            val result = galleryAnalysisService.execute24HourGalleryAnalysis(action)
+            
+            // Store results in context
+            context.setVariable(action.outputVariable, result.outputData[action.outputVariable] ?: "")
+            result.outputData.forEach { (key, value) ->
+                context.setVariable(key, value)
+            }
+            
+            if (result.success) {
+                Log.i(TAG, "✅ 24-hour gallery analysis completed successfully")
+                Result.success(result.message)
+            } else {
+                Log.e(TAG, "❌ 24-hour gallery analysis failed: ${result.message}")
+                Result.failure(Exception(result.message))
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 Error in 24-hour gallery analysis execution", e)
+            Result.failure(e)
+        }
     }
 }
 

@@ -938,6 +938,7 @@ enum class ActionType {
     AI_GENERATE_REPLY,
     AI_SMART_SUMMARIZE_AND_FORWARD, // New Zapier-like smart action
     AI_AUTO_EMAIL_SUMMARIZER, // Simple auto email summarizer
+    AI_24H_GALLERY_ANALYSIS, // 24-hour gallery analysis with keyword filtering and LLM processing
     DELAY,
     CONDITIONAL
 }
@@ -1268,6 +1269,18 @@ fun convertActionConfig(config: ActionConfig, users: List<WorkflowUser>): MultiU
                 includeOriginalSender = config.config["includeOriginalSender"]?.toBooleanStrictOrNull() ?: true,
                 customSubjectPrefix = config.config["customSubjectPrefix"] ?: "[Summary]",
                 summaryOutputVariable = config.config["summaryOutputVar"] ?: "email_summary"
+            )
+        }
+        ActionType.AI_24H_GALLERY_ANALYSIS -> {
+            MultiUserAction.AI24HourGalleryAnalysis(
+                searchKeyword = config.config["searchKeyword"] ?: "person",
+                deliveryMethod = config.config["deliveryMethod"] ?: "gmail",
+                recipientEmail = config.config["recipientEmail"] ?: "",
+                telegramChatId = config.config["telegramChatId"]?.toLongOrNull() ?: 0L,
+                maxImages = config.config["maxImages"]?.toIntOrNull() ?: 50,
+                analysisPrompt = config.config["analysisPrompt"] ?: "Analyze these images and provide a summary of what you see",
+                includeImagePaths = config.config["includeImagePaths"]?.toBooleanStrictOrNull() ?: false,
+                outputVariable = config.config["outputVar"] ?: "gallery_analysis_result"
             )
         }
         ActionType.DELAY -> MultiUserAction.DelayAction(
@@ -2172,6 +2185,35 @@ fun ActionPickerDialog(
                             }
                             item {
                                 ActionOptionCard(
+                                    title = "24H Gallery Analysis",
+                                    description = "Analyze previous 24 hours of gallery images with keyword filtering and send results via Gmail/Telegram",
+                                    icon = "📸🔍",
+                                    onClick = {
+                                        val keyword = actionConfig["searchKeyword"] ?: "person"
+                                        val delivery = actionConfig["deliveryMethod"] ?: "gmail"
+                                        onActionSelected(ActionConfig(
+                                            type = ActionType.AI_24H_GALLERY_ANALYSIS,
+                                            displayName = "24H Gallery Analysis: '$keyword' → $delivery",
+                                            config = actionConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = actionConfig,
+                                    onConfigChange = { key, value ->
+                                        actionConfig = actionConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "searchKeyword" to "Keyword to search for (e.g., person, car, text)",
+                                        "deliveryMethod" to "Delivery method (gmail/telegram)",
+                                        "recipientEmail" to "Email address (for Gmail)",
+                                        "telegramChatId" to "Telegram chat ID (for Telegram)",
+                                        "maxImages" to "Maximum images to process (default: 50)",
+                                        "analysisPrompt" to "Custom LLM analysis prompt"
+                                    )
+                                )
+                            }
+                            item {
+                                ActionOptionCard(
                                     title = "Auto Email Summarizer",
                                     description = "Automatically summarize triggered emails and forward to specified addresses",
                                     icon = "📧🤖",
@@ -2736,6 +2778,7 @@ fun ActionPreview(
                 ActionType.AI_GENERATE_REPLY -> "🤖"
                 ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> "🤖📝"
                 ActionType.AI_AUTO_EMAIL_SUMMARIZER -> "📧🤖"
+                ActionType.AI_24H_GALLERY_ANALYSIS -> "📸🔍"
                 ActionType.DELAY -> "⏱️"
                 ActionType.CONDITIONAL -> "🔀"
             }
@@ -2775,6 +2818,7 @@ fun ActionPreview(
                         ActionType.AI_GENERATE_REPLY -> "Generate smart reply with AI"
                         ActionType.AI_SMART_SUMMARIZE_AND_FORWARD -> "Smart summarize and forward with AI"
                         ActionType.AI_AUTO_EMAIL_SUMMARIZER -> "Auto-summarize and forward emails"
+                        ActionType.AI_24H_GALLERY_ANALYSIS -> "Analyze previous 24h gallery images with keyword search"
                         ActionType.DELAY -> "Wait before next action"
                         ActionType.CONDITIONAL -> "Execute conditionally"
                     },
@@ -3592,7 +3636,7 @@ fun determinePlatforms(trigger: TriggerConfig, actions: List<ActionConfig>): Lis
                 platforms.add(WorkflowPlatform.TELEGRAM)
             }
             ActionType.AI_ANALYZE, ActionType.AI_SUMMARIZE, ActionType.AI_TRANSLATE, ActionType.AI_GENERATE_REPLY, 
-            ActionType.AI_SMART_SUMMARIZE_AND_FORWARD, ActionType.AI_AUTO_EMAIL_SUMMARIZER -> {
+            ActionType.AI_SMART_SUMMARIZE_AND_FORWARD, ActionType.AI_AUTO_EMAIL_SUMMARIZER, ActionType.AI_24H_GALLERY_ANALYSIS -> {
                 platforms.add(WorkflowPlatform.AI)
             }
             else -> {}
