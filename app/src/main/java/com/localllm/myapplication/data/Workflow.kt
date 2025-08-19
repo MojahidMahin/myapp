@@ -202,6 +202,23 @@ sealed class MultiUserTrigger {
         val enableObjectDetection: Boolean = true,
         val enablePeopleDetection: Boolean = true
     ) : MultiUserTrigger()
+    
+    data class TimeBasedImageAnalysisTrigger(
+        val userId: String,
+        val triggerName: String,
+        val timeSchedule: ImageAnalysisTimeSchedule,
+        val imageAttachments: List<ImageAttachment> = emptyList(),
+        val analysisQuestions: List<String> = emptyList(),
+        val analysisKeywords: List<String> = emptyList(),
+        val analysisType: ImageAnalysisType = ImageAnalysisType.COMPREHENSIVE,
+        val triggerOnKeywordMatch: Boolean = false,
+        val minimumConfidence: Float = 0.5f,
+        val enableOCR: Boolean = true,
+        val enableObjectDetection: Boolean = true,
+        val enablePeopleDetection: Boolean = true,
+        val timezone: String = "UTC", // Timezone for scheduling
+        val lastExecutionTime: Long = 0L // Track last execution time
+    ) : MultiUserTrigger()
 }
 
 /**
@@ -611,4 +628,64 @@ enum class ImageComparisonType {
     COLOR_DIFFERENCES, // Compare color schemes
     STRUCTURAL_DIFFERENCES, // Compare composition and structure
     COMPREHENSIVE // All comparison types
+}
+
+/**
+ * Time schedule configuration for time-based image analysis triggers
+ */
+data class ImageAnalysisTimeSchedule(
+    val scheduleType: TimeScheduleType,
+    val timeOfDay: String, // Format: "HH:mm" (e.g., "22:00", "09:30")
+    val daysOfWeek: List<DayOfWeek> = listOf(
+        DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, 
+        DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY, DayOfWeek.SUNDAY
+    ), // Days when trigger should fire
+    val startDate: String? = null, // Optional start date (yyyy-MM-dd)
+    val endDate: String? = null, // Optional end date (yyyy-MM-dd)
+    val intervalMinutes: Int = 0, // For INTERVAL type: minutes between executions
+    val isRecurring: Boolean = true // Whether to repeat the schedule
+)
+
+/**
+ * Types of time-based scheduling
+ */
+enum class TimeScheduleType {
+    DAILY, // Execute at specific time daily
+    WEEKLY, // Execute at specific time on specific days of week
+    ONCE, // Execute only once at specified time
+    INTERVAL // Execute at regular intervals (every X minutes)
+}
+
+/**
+ * Days of the week for scheduling
+ */
+enum class DayOfWeek(val value: Int) {
+    MONDAY(1),
+    TUESDAY(2),
+    WEDNESDAY(3),
+    THURSDAY(4),
+    FRIDAY(5),
+    SATURDAY(6),
+    SUNDAY(7);
+    
+    companion object {
+        fun fromValue(value: Int): DayOfWeek? {
+            return values().find { it.value == value }
+        }
+        
+        fun fromCalendarDay(calendarDay: Int): DayOfWeek? {
+            // Calendar.SUNDAY = 1, MONDAY = 2, etc.
+            // Our enum: MONDAY = 1, TUESDAY = 2, etc., SUNDAY = 7
+            return when (calendarDay) {
+                java.util.Calendar.MONDAY -> MONDAY
+                java.util.Calendar.TUESDAY -> TUESDAY
+                java.util.Calendar.WEDNESDAY -> WEDNESDAY
+                java.util.Calendar.THURSDAY -> THURSDAY
+                java.util.Calendar.FRIDAY -> FRIDAY
+                java.util.Calendar.SATURDAY -> SATURDAY
+                java.util.Calendar.SUNDAY -> SUNDAY
+                else -> null
+            }
+        }
+    }
 }

@@ -237,6 +237,7 @@ class WorkflowTriggerManager(
                 }
                 is MultiUserTrigger.ImageAnalysisTrigger -> checkImageAnalysisTrigger(workflow, trigger)
                 is MultiUserTrigger.AutoImageAnalysisTrigger -> checkAutoImageAnalysisTrigger(workflow, trigger)
+                is MultiUserTrigger.TimeBasedImageAnalysisTrigger -> checkTimeBasedImageAnalysisTrigger(workflow, trigger)
                 else -> TriggerExecutionResult(workflow.id, trigger::class.simpleName ?: "Unknown", false)
             }
         } catch (e: Exception) {
@@ -1121,6 +1122,316 @@ class WorkflowTriggerManager(
         } finally {
             Log.d(TAG, "🏁 === AUTO IMAGE ANALYSIS TRIGGER CHECK END ===")
         }
+    }
+    
+    /**
+     * Check Time-Based Image Analysis trigger
+     */
+    private suspend fun checkTimeBasedImageAnalysisTrigger(
+        workflow: MultiUserWorkflow,
+        trigger: MultiUserTrigger.TimeBasedImageAnalysisTrigger
+    ): TriggerExecutionResult {
+        return try {
+            Log.i(TAG, "⏰ === TIME-BASED IMAGE ANALYSIS TRIGGER CHECK START ===")
+            Log.i(TAG, "📋 Workflow: ${workflow.name} (ID: ${workflow.id})")
+            Log.i(TAG, "👤 User: ${trigger.userId}")
+            Log.i(TAG, "🏷️ Trigger Name: ${trigger.triggerName}")
+            Log.i(TAG, "📅 Schedule Type: ${trigger.timeSchedule.scheduleType}")
+            Log.i(TAG, "🕐 Time of Day: ${trigger.timeSchedule.timeOfDay}")
+            Log.i(TAG, "📷 Image attachments: ${trigger.imageAttachments.size}")
+            
+            // Check if it's time to trigger based on schedule
+            val currentTime = System.currentTimeMillis()
+            val shouldTrigger = isTimeToTrigger(trigger.timeSchedule, trigger.lastExecutionTime, currentTime)
+            
+            if (!shouldTrigger.first) {
+                Log.d(TAG, "⏰ Not yet time to trigger: ${shouldTrigger.second}")
+                return TriggerExecutionResult(
+                    workflow.id,
+                    "TimeBasedImageAnalysisTrigger",
+                    false,
+                    shouldTrigger.second
+                )
+            }
+            
+            Log.i(TAG, "✅ Time condition met, proceeding with image analysis")
+            
+            if (trigger.imageAttachments.isEmpty()) {
+                Log.w(TAG, "⚠️ No image attachments provided for time-based image analysis trigger")
+                return TriggerExecutionResult(
+                    workflow.id,
+                    "TimeBasedImageAnalysisTrigger",
+                    false,
+                    "No image attachments provided"
+                )
+            }
+            
+            // Get image analysis service
+            val imageAnalysisService = getImageAnalysisService()
+            if (imageAnalysisService == null) {
+                Log.e(TAG, "❌ Image analysis service not available")
+                return TriggerExecutionResult(
+                    workflow.id,
+                    "TimeBasedImageAnalysisTrigger",
+                    false,
+                    "Image analysis service not available"
+                )
+            }
+            
+            Log.d(TAG, "🔍 Starting scheduled analysis of ${trigger.imageAttachments.size} image(s)")
+            
+            val analysisResults = mutableListOf<ImageAnalysisWorkflowResult>()
+            var hasValidTrigger = false
+            
+            // Analyze each image attachment
+            for ((index, attachment) in trigger.imageAttachments.withIndex()) {
+                Log.d(TAG, "📷 Analyzing image ${index + 1}/${trigger.imageAttachments.size}: ${attachment.fileName}")
+                
+                try {
+                    val bitmap = loadImageFromAttachment(attachment)
+                    if (bitmap == null) {
+                        Log.w(TAG, "❌ Failed to load image: ${attachment.fileName}")
+                        continue
+                    }
+                    
+                    // Combine analysis questions from trigger and attachment
+                    val combinedQuestions = (trigger.analysisQuestions + attachment.analysisQuestions).distinct()
+                    
+                    // Perform image analysis
+                    val analysisResult = imageAnalysisService.analyzeImage(
+                        bitmap = bitmap,
+                        userQuestion = combinedQuestions.joinToString("; ")
+                    )
+                    
+                    if (analysisResult.success) {
+                        // Extract keywords from analysis
+                        val extractedKeywords = extractKeywordsFromAnalysis(analysisResult)
+                        
+                        // Check for keyword matches if required
+                        val keywordMatches = if (trigger.analysisKeywords.isNotEmpty()) {
+                            findKeywordMatches(extractedKeywords, trigger.analysisKeywords)
+                        } else {
+                            emptyList()
+                        }
+                        
+                        // Check if this result should trigger the workflow
+                        val shouldTriggerWorkflow = if (trigger.triggerOnKeywordMatch) {
+                            keywordMatches.isNotEmpty()
+                        } else {
+                            analysisResult.confidence >= trigger.minimumConfidence
+                        }
+                        
+                        if (shouldTriggerWorkflow) {
+                            hasValidTrigger = true
+                        }
+                        
+                        val workflowResult = ImageAnalysisWorkflowResult(
+                            attachmentId = attachment.id,
+                            fileName = attachment.fileName,
+                            success = true,
+                            analysisType = trigger.analysisType,
+                            description = analysisResult.description,
+                            ocrText = analysisResult.ocrText,
+                            peopleCount = analysisResult.objectsDetected.peopleCount,
+                            detectedObjects = analysisResult.objectsDetected.detectedObjects,
+                            dominantColors = analysisResult.visualElements.dominantColors,
+                            confidence = analysisResult.confidence,
+                            keywords = extractedKeywords,
+                            keywordMatches = keywordMatches,
+                            visualElements = mapOf(
+                                "brightness" to analysisResult.visualElements.brightness,
+                                "contrast" to analysisResult.visualElements.contrast,
+                                "composition" to analysisResult.visualElements.composition,
+                                "clarity" to analysisResult.visualElements.clarity
+                            ),
+                            analysisTime = System.currentTimeMillis()
+                        )
+                        
+                        analysisResults.add(workflowResult)
+                        
+                        Log.i(TAG, "✅ Scheduled analysis completed for ${attachment.fileName}")
+                        Log.d(TAG, "   Confidence: ${analysisResult.confidence}")
+                        Log.d(TAG, "   Keywords found: ${extractedKeywords.size}")
+                        Log.d(TAG, "   Keyword matches: ${keywordMatches.size}")
+                        Log.d(TAG, "   Should trigger: $shouldTriggerWorkflow")
+                        
+                    } else {
+                        Log.w(TAG, "❌ Scheduled analysis failed for ${attachment.fileName}")
+                        analysisResults.add(
+                            ImageAnalysisWorkflowResult(
+                                attachmentId = attachment.id,
+                                fileName = attachment.fileName,
+                                success = false,
+                                analysisType = trigger.analysisType,
+                                description = "Analysis failed",
+                                error = "Image analysis failed"
+                            )
+                        )
+                    }
+                    
+                } catch (e: Exception) {
+                    Log.e(TAG, "💥 Exception analyzing scheduled image ${attachment.fileName}", e)
+                    analysisResults.add(
+                        ImageAnalysisWorkflowResult(
+                            attachmentId = attachment.id,
+                            fileName = attachment.fileName,
+                            success = false,
+                            analysisType = trigger.analysisType,
+                            description = "Analysis failed with exception",
+                            error = e.message
+                        )
+                    )
+                }
+            }
+            
+            if (hasValidTrigger && analysisResults.isNotEmpty()) {
+                // Update last execution time - you would need to persist this in the workflow
+                // For now, we'll track it in memory
+                updateLastExecutionTime(workflow.id, currentTime)
+                
+                // Create trigger data with analysis results
+                val triggerData = mapOf(
+                    "source" to "time_based_image_analysis",
+                    "trigger_name" to trigger.triggerName,
+                    "scheduled_time" to trigger.timeSchedule.timeOfDay,
+                    "execution_time" to java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(currentTime)),
+                    "analysis_type" to trigger.analysisType.name,
+                    "images_analyzed" to analysisResults.size.toString(),
+                    "successful_analyses" to analysisResults.count { it.success }.toString(),
+                    "analysis_results" to analysisResults.joinToString("\n\n") { result ->
+                        "Image: ${result.fileName}\n" +
+                        "Success: ${result.success}\n" +
+                        "Description: ${result.description}\n" +
+                        "OCR Text: ${result.ocrText}\n" +
+                        "People Count: ${result.peopleCount}\n" +
+                        "Objects: ${result.detectedObjects.joinToString(", ")}\n" +
+                        "Keywords: ${result.keywords.joinToString(", ")}\n" +
+                        "Keyword Matches: ${result.keywordMatches.joinToString(", ")}"
+                    },
+                    "type" to "time_based_image_analysis_trigger"
+                )
+                
+                Log.i(TAG, "🎯 TRIGGERING SCHEDULED WORKFLOW - Time-based image analysis conditions met")
+                Log.i(TAG, "   Scheduled time: ${trigger.timeSchedule.timeOfDay}")
+                Log.i(TAG, "   Analyzed images: ${analysisResults.size}")
+                Log.i(TAG, "   Successful analyses: ${analysisResults.count { it.success }}")
+                
+                executeWorkflowWithData(workflow, trigger.userId, triggerData)
+            } else {
+                Log.d(TAG, "⭕ Time-based trigger executed but analysis conditions not met")
+                Log.d(TAG, "   Has valid trigger: $hasValidTrigger")
+                Log.d(TAG, "   Analysis results: ${analysisResults.size}")
+                
+                // Still update execution time even if analysis conditions weren't met
+                // to prevent repeated executions at the same scheduled time
+                updateLastExecutionTime(workflow.id, currentTime)
+                
+                TriggerExecutionResult(
+                    workflow.id,
+                    "TimeBasedImageAnalysisTrigger",
+                    false,
+                    "Scheduled analysis completed but trigger conditions not met"
+                )
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "💥 ERROR in Time-Based Image Analysis trigger check", e)
+            TriggerExecutionResult(
+                workflow.id,
+                "TimeBasedImageAnalysisTrigger",
+                false,
+                "Error: ${e.message}"
+            )
+        } finally {
+            Log.d(TAG, "🏁 === TIME-BASED IMAGE ANALYSIS TRIGGER CHECK END ===")
+        }
+    }
+    
+    /**
+     * Check if it's time to trigger based on the schedule
+     */
+    private fun isTimeToTrigger(
+        schedule: ImageAnalysisTimeSchedule,
+        lastExecutionTime: Long,
+        currentTime: Long
+    ): Pair<Boolean, String> {
+        val currentCalendar = java.util.Calendar.getInstance()
+        val currentHour = currentCalendar.get(java.util.Calendar.HOUR_OF_DAY)
+        val currentMinute = currentCalendar.get(java.util.Calendar.MINUTE)
+        val currentDayOfWeek = DayOfWeek.fromCalendarDay(currentCalendar.get(java.util.Calendar.DAY_OF_WEEK))
+        
+        // Parse scheduled time
+        val timeParts = schedule.timeOfDay.split(":")
+        if (timeParts.size != 2) {
+            return Pair(false, "Invalid time format: ${schedule.timeOfDay}")
+        }
+        
+        val scheduledHour = timeParts[0].toIntOrNull() ?: return Pair(false, "Invalid hour: ${timeParts[0]}")
+        val scheduledMinute = timeParts[1].toIntOrNull() ?: return Pair(false, "Invalid minute: ${timeParts[1]}")
+        
+        // Check if we're within the scheduled time window (allow 1 minute window)
+        val timeDiffMinutes = kotlin.math.abs((currentHour * 60 + currentMinute) - (scheduledHour * 60 + scheduledMinute))
+        val isWithinTimeWindow = timeDiffMinutes <= 1
+        
+        if (!isWithinTimeWindow) {
+            val nextTriggerTime = String.format("%02d:%02d", scheduledHour, scheduledMinute)
+            return Pair(false, "Current time ${String.format("%02d:%02d", currentHour, currentMinute)} is not within trigger window (${nextTriggerTime} ±1 min)")
+        }
+        
+        // Check if we've already executed today (for daily/weekly schedules)
+        val lastExecutionCalendar = java.util.Calendar.getInstance()
+        lastExecutionCalendar.timeInMillis = lastExecutionTime
+        
+        val isSameDay = currentCalendar.get(java.util.Calendar.YEAR) == lastExecutionCalendar.get(java.util.Calendar.YEAR) &&
+                       currentCalendar.get(java.util.Calendar.DAY_OF_YEAR) == lastExecutionCalendar.get(java.util.Calendar.DAY_OF_YEAR)
+        
+        when (schedule.scheduleType) {
+            TimeScheduleType.DAILY -> {
+                if (isSameDay && lastExecutionTime > 0) {
+                    return Pair(false, "Already executed today at ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(lastExecutionTime))}")
+                }
+                return Pair(true, "Daily trigger condition met")
+            }
+            
+            TimeScheduleType.WEEKLY -> {
+                if (currentDayOfWeek == null || !schedule.daysOfWeek.contains(currentDayOfWeek)) {
+                    val daysStr = schedule.daysOfWeek.joinToString(", ") { it.name.take(3) }
+                    return Pair(false, "Today (${currentDayOfWeek?.name ?: "Unknown"}) is not in scheduled days: $daysStr")
+                }
+                
+                if (isSameDay && lastExecutionTime > 0) {
+                    return Pair(false, "Already executed today at ${java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(lastExecutionTime))}")
+                }
+                
+                return Pair(true, "Weekly trigger condition met for ${currentDayOfWeek.name}")
+            }
+            
+            TimeScheduleType.ONCE -> {
+                if (lastExecutionTime > 0) {
+                    return Pair(false, "One-time trigger already executed at ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(lastExecutionTime))}")
+                }
+                return Pair(true, "One-time trigger condition met")
+            }
+            
+            TimeScheduleType.INTERVAL -> {
+                val intervalMillis = schedule.intervalMinutes * 60 * 1000L
+                if (lastExecutionTime > 0 && (currentTime - lastExecutionTime) < intervalMillis) {
+                    val remainingMinutes = ((intervalMillis - (currentTime - lastExecutionTime)) / 60000).toInt()
+                    return Pair(false, "Interval not yet reached, ${remainingMinutes} minutes remaining")
+                }
+                return Pair(true, "Interval trigger condition met")
+            }
+        }
+    }
+    
+    /**
+     * Update last execution time for a workflow (in-memory for now)
+     */
+    private val lastExecutionTimes = mutableMapOf<String, Long>()
+    
+    private fun updateLastExecutionTime(workflowId: String, executionTime: Long) {
+        lastExecutionTimes[workflowId] = executionTime
+        Log.d(TAG, "Updated last execution time for workflow $workflowId: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(executionTime))}")
     }
     
     /**

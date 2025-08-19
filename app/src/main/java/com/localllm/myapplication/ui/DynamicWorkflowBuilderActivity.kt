@@ -920,7 +920,8 @@ enum class TriggerType {
     GEOFENCE_EXIT,
     GEOFENCE_DWELL,
     IMAGE_ANALYSIS,
-    AUTO_IMAGE_ANALYSIS
+    AUTO_IMAGE_ANALYSIS,
+    TIME_BASED_IMAGE_ANALYSIS
 }
 
 enum class ActionType {
@@ -1153,6 +1154,29 @@ fun convertTriggerConfig(config: TriggerConfig, userId: String): MultiUserTrigge
             analysisType = ImageAnalysisType.COMPREHENSIVE,
             enableOCR = config.config["enableOCR"]?.toBooleanStrictOrNull() ?: true,
             enableObjectDetection = config.config["enableObjectDetection"]?.toBooleanStrictOrNull() ?: true,
+            enablePeopleDetection = true
+        )
+        TriggerType.TIME_BASED_IMAGE_ANALYSIS -> MultiUserTrigger.TimeBasedImageAnalysisTrigger(
+            userId = userId,
+            triggerName = config.config["triggerName"] ?: "Time-Based Image Analysis",
+            timeSchedule = ImageAnalysisTimeSchedule(
+                scheduleType = when (config.config["scheduleType"]?.uppercase()) {
+                    "DAILY" -> TimeScheduleType.DAILY
+                    "WEEKLY" -> TimeScheduleType.WEEKLY
+                    "ONCE" -> TimeScheduleType.ONCE
+                    "INTERVAL" -> TimeScheduleType.INTERVAL
+                    else -> TimeScheduleType.DAILY
+                },
+                timeOfDay = config.config["timeOfDay"] ?: "09:30",
+                isRecurring = config.config["scheduleType"]?.uppercase() != "ONCE"
+            ),
+            imageAttachments = emptyList(), // Will be populated when images are attached
+            analysisKeywords = config.config["analysisKeywords"]?.split(",")?.map { it.trim() } ?: emptyList(),
+            analysisType = ImageAnalysisType.COMPREHENSIVE,
+            triggerOnKeywordMatch = config.config["analysisKeywords"]?.isNotBlank() == true,
+            minimumConfidence = config.config["minimumConfidence"]?.toFloatOrNull() ?: 0.5f,
+            enableOCR = true,
+            enableObjectDetection = true,
             enablePeopleDetection = true
         )
         else -> MultiUserTrigger.ManualTrigger(name = "Default")
@@ -1668,6 +1692,32 @@ fun TriggerPickerDialog(
                                         "analysisKeywords" to "Keywords to monitor (comma-separated)",
                                         "enableOCR" to "Enable OCR (true/false)",
                                         "enableObjectDetection" to "Enable object detection (true/false)"
+                                    )
+                                )
+                            }
+                            item {
+                                TriggerOptionCard(
+                                    title = "Time-Based Image Analysis",
+                                    description = "Analyze images at scheduled times (e.g., 10 PM, 9:30 AM)",
+                                    icon = "⏰📸",
+                                    onClick = {
+                                        onTriggerSelected(TriggerConfig(
+                                            type = TriggerType.TIME_BASED_IMAGE_ANALYSIS,
+                                            displayName = "Time-Based Analysis: ${triggerConfig["triggerName"] ?: "Scheduled at ${triggerConfig["timeOfDay"] ?: "09:30"}"}",
+                                            config = triggerConfig
+                                        ))
+                                    },
+                                    configurable = true,
+                                    currentConfig = triggerConfig,
+                                    onConfigChange = { key, value ->
+                                        triggerConfig = triggerConfig + (key to value)
+                                    },
+                                    configFields = listOf(
+                                        "triggerName" to "Trigger Name",
+                                        "timeOfDay" to "Time (HH:mm, e.g., 22:00, 09:30)",
+                                        "scheduleType" to "Schedule Type (DAILY, WEEKLY, ONCE)",
+                                        "analysisKeywords" to "Keywords to look for (comma-separated)",
+                                        "minimumConfidence" to "Minimum confidence (0.0-1.0)"
                                     )
                                 )
                             }
@@ -2617,7 +2667,7 @@ fun TriggerPreview(trigger: TriggerConfig) {
                 TriggerType.SCHEDULED_TIME -> "⏰"
                 TriggerType.MANUAL_TRIGGER -> "🎯"
                 TriggerType.GEOFENCE_ENTER, TriggerType.GEOFENCE_EXIT, TriggerType.GEOFENCE_DWELL -> "📍"
-                TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS -> "📸"
+                TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS, TriggerType.TIME_BASED_IMAGE_ANALYSIS -> "📸"
             }
             
             Text(
@@ -2647,6 +2697,7 @@ fun TriggerPreview(trigger: TriggerConfig) {
                         TriggerType.GEOFENCE_DWELL -> "Triggers when staying at a location"
                         TriggerType.IMAGE_ANALYSIS -> "Analyzes uploaded images for specific content"
                         TriggerType.AUTO_IMAGE_ANALYSIS -> "Automatically analyzes images from other sources"
+                        TriggerType.TIME_BASED_IMAGE_ANALYSIS -> "Analyzes images at scheduled times"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -3565,7 +3616,7 @@ fun generateTemplateTags(trigger: TriggerConfig, actions: List<ActionConfig>): L
         TriggerType.SCHEDULED_TIME -> tags.add("Scheduled")
         TriggerType.MANUAL_TRIGGER -> tags.add("Manual")
         TriggerType.GEOFENCE_ENTER, TriggerType.GEOFENCE_EXIT, TriggerType.GEOFENCE_DWELL -> tags.add("Location")
-        TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS -> tags.add("Image Analysis")
+        TriggerType.IMAGE_ANALYSIS, TriggerType.AUTO_IMAGE_ANALYSIS, TriggerType.TIME_BASED_IMAGE_ANALYSIS -> tags.add("Image Analysis")
     }
     
     // Add action-based tags
