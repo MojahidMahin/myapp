@@ -246,8 +246,8 @@ class GalleryAnalysisService @Inject constructor(
     private suspend fun analyzeImagesWithLLM(
         images: List<GalleryImage>,
         analysisPrompt: String
-    ): List<ImageAnalysisResult> = withContext(Dispatchers.IO) {
-        val results = mutableListOf<ImageAnalysisResult>()
+    ): List<GalleryImageAnalysisResult> = withContext(Dispatchers.IO) {
+        val results = mutableListOf<GalleryImageAnalysisResult>()
 
         for ((index, image) in images.withIndex()) {
             try {
@@ -260,7 +260,7 @@ class GalleryAnalysisService @Inject constructor(
                         userQuestion = analysisPrompt
                     )
 
-                    results.add(ImageAnalysisResult(
+                    results.add(GalleryImageAnalysisResult(
                         imageName = image.name,
                         imagePath = image.path,
                         dateTaken = image.dateTaken,
@@ -277,7 +277,7 @@ class GalleryAnalysisService @Inject constructor(
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in LLM analysis for ${image.name}", e)
-                results.add(ImageAnalysisResult(
+                results.add(GalleryImageAnalysisResult(
                     imageName = image.name,
                     imagePath = image.path,
                     dateTaken = image.dateTaken,
@@ -295,7 +295,7 @@ class GalleryAnalysisService @Inject constructor(
      */
     private fun generateSummaryReport(
         images: List<GalleryImage>,
-        analysisResults: List<ImageAnalysisResult>,
+        analysisResults: List<GalleryImageAnalysisResult>,
         keyword: String,
         includeImagePaths: Boolean
     ): String {
@@ -452,9 +452,9 @@ data class GalleryImage(
 )
 
 /**
- * Data class for image analysis results
+ * Data class for gallery image analysis results
  */
-data class ImageAnalysisResult(
+data class GalleryImageAnalysisResult(
     val imageName: String,
     val imagePath: String,
     val dateTaken: Long,

@@ -5,6 +5,7 @@ import android.util.Log
 import com.localllm.myapplication.data.*
 import com.localllm.myapplication.service.integration.GmailIntegrationService
 import com.localllm.myapplication.service.integration.TelegramBotService
+import com.localllm.myapplication.service.ai.AIProcessingFacade
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -2176,14 +2177,15 @@ class MultiUserWorkflowEngine(
             Log.d(TAG, "Max images: ${action.maxImages}")
             
             // Create services
-            val gmailService = GmailIntegrationService()
+            val gmailService = GmailIntegrationService(this.context)
             val telegramService = TelegramBotService(this.context)
             val imageAnalysisService = ImageAnalysisService()
             
-            // Create gallery analysis service
+            // Create gallery analysis service  
+            val aiProcessingFacade = AIProcessingFacade(this.context)
             val galleryAnalysisService = GalleryAnalysisService(
                 context = this.context,
-                aiProcessingFacade = aiProcessor,
+                aiProcessingFacade = aiProcessingFacade,
                 gmailService = gmailService,
                 telegramService = telegramService,
                 imageAnalysisService = imageAnalysisService
@@ -2193,9 +2195,9 @@ class MultiUserWorkflowEngine(
             val result = galleryAnalysisService.execute24HourGalleryAnalysis(action)
             
             // Store results in context
-            context.setVariable(action.outputVariable, result.outputData[action.outputVariable] ?: "")
+            context.variables[action.outputVariable] = result.outputData[action.outputVariable] ?: ""
             result.outputData.forEach { (key, value) ->
-                context.setVariable(key, value)
+                context.variables[key] = value
             }
             
             if (result.success) {

@@ -504,6 +504,16 @@ data class WorkflowExecutionResult(
 )
 
 /**
+ * Action execution result
+ */
+data class ActionExecutionResult(
+    val success: Boolean,
+    val message: String,
+    val outputData: Map<String, String> = emptyMap(),
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
  * Supporting data classes for AISmartSummarizeAndForward action
  */
 
