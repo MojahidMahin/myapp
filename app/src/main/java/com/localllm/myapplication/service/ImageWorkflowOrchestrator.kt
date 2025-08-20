@@ -9,6 +9,8 @@ import com.google.android.gms.common.util.Strings
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.face.FaceDetection
+import com.google.mlkit.vision.face.FaceDetectorOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.tasks.await
@@ -38,17 +40,26 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
     
+    private val faceDetector by lazy {
+        val options = FaceDetectorOptions.Builder()
+            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+            .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
+            .build()
+        FaceDetection.getClient(options)
+    }
+    
     // Note: GalleryAnalysisService integration would need to be implemented
     // private val galleryAnalysisService by lazy { GalleryAnalysisService(context) }
     
     suspend fun processWorkflowInstruction(
         instruction: String,
-        referenceImageUri: Uri? = null
+        referenceImageUri: Uri? = null,
+        timeRangeSelection: String? = null
     ): Result<WorkflowResult> = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Processing workflow instruction: $instruction")
             
-            val timeRange = extractTimeRange(instruction)
+            val timeRange = timeRangeSelection?.let { getTimeRangeFromSelection(it) } ?: extractTimeRange(instruction)
             Log.d(TAG, "Extracted time range: ${timeRange.start} to ${timeRange.end}")
             
             val condition = extractFilteringCondition(instruction)
@@ -145,14 +156,77 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         }
     }
     
+    private fun getTimeRangeFromSelection(selection: String): TimeRange {
+        val now = LocalDateTime.now()
+        val formatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
+        
+        return when (selection) {
+            "last_24_hours" -> {
+                val start = now.minusHours(24)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = now.format(formatter)
+                )
+            }
+            "yesterday" -> {
+                val start = now.minusDays(1).withHour(0).withMinute(0).withSecond(0)
+                val end = now.minusDays(1).withHour(23).withMinute(59).withSecond(59)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = end.format(formatter)
+                )
+            }
+            "today" -> {
+                val start = now.withHour(0).withMinute(0).withSecond(0)
+                val end = now.withHour(23).withMinute(59).withSecond(59)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = end.format(formatter)
+                )
+            }
+            "past_week" -> {
+                val start = now.minusWeeks(1)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = now.format(formatter)
+                )
+            }
+            "past_month" -> {
+                val start = now.minusMonths(1)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = now.format(formatter)
+                )
+            }
+            "all_time" -> {
+                val start = now.minusYears(10)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = now.format(formatter)
+                )
+            }
+            else -> {
+                // Default to last 24 hours
+                val start = now.minusHours(24)
+                TimeRange(
+                    start = start.format(formatter),
+                    end = now.format(formatter)
+                )
+            }
+        }
+    }
+    
     private fun extractFilteringCondition(instruction: String): String {
         return when {
+            instruction.contains("receipt", ignoreCase = true) || 
             instruction.contains("receipts", ignoreCase = true) -> "receipts"
             instruction.contains("wedding", ignoreCase = true) -> "wedding"
             instruction.contains("screenshots", ignoreCase = true) -> "screenshots"
             instruction.contains("documents", ignoreCase = true) -> "documents"
             instruction.contains("food", ignoreCase = true) -> "food"
             instruction.contains("text", ignoreCase = true) -> "text"
+            instruction.contains("people", ignoreCase = true) || 
+            instruction.contains("faces", ignoreCase = true) -> "faces"
             instruction.contains("like this", ignoreCase = true) || 
             instruction.contains("similar to", ignoreCase = true) -> "similar_image"
             else -> "all"
@@ -161,6 +235,10 @@ class ImageWorkflowOrchestrator(private val context: Context) {
     
     private fun extractAction(instruction: String): String {
         return when {
+            instruction.contains("total spending", ignoreCase = true) ||
+            instruction.contains("total amount", ignoreCase = true) ||
+            instruction.contains("calculate", ignoreCase = true) ||
+            instruction.contains("total", ignoreCase = true) -> "calculate"
             instruction.contains("summarize", ignoreCase = true) ||
             instruction.contains("summary", ignoreCase = true) -> "summarize"
             instruction.contains("send", ignoreCase = true) -> "send"
@@ -168,8 +246,6 @@ class ImageWorkflowOrchestrator(private val context: Context) {
             instruction.contains("move", ignoreCase = true) -> "move"
             instruction.contains("delete", ignoreCase = true) -> "delete"
             instruction.contains("analyze", ignoreCase = true) -> "analyze"
-            instruction.contains("calculate", ignoreCase = true) ||
-            instruction.contains("total", ignoreCase = true) -> "calculate"
             else -> "list"
         }
     }
@@ -183,12 +259,69 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         }
     }
     
-    private suspend fun getGalleryImagesInTimeRange(timeRange: TimeRange): List<GalleryImage> {
+    private suspend fun getGalleryImagesInTimeRange(timeRange: TimeRange): List<GalleryImage> = withContext(Dispatchers.IO) {
         val startTime = LocalDateTime.parse(timeRange.start).toEpochSecond(ZoneOffset.UTC) * 1000
         val endTime = LocalDateTime.parse(timeRange.end).toEpochSecond(ZoneOffset.UTC) * 1000
         
-        // For demo purposes, return empty list. In real implementation, query MediaStore
-        return emptyList()
+        val images = mutableListOf<GalleryImage>()
+        
+        try {
+            val projection = arrayOf(
+                MediaStore.Images.Media._ID,
+                MediaStore.Images.Media.DISPLAY_NAME,
+                MediaStore.Images.Media.DATE_TAKEN,
+                MediaStore.Images.Media.SIZE,
+                MediaStore.Images.Media.DATA
+            )
+            
+            val selection = "${MediaStore.Images.Media.DATE_TAKEN} >= ? AND ${MediaStore.Images.Media.DATE_TAKEN} <= ?"
+            val selectionArgs = arrayOf(startTime.toString(), endTime.toString())
+            val sortOrder = "${MediaStore.Images.Media.DATE_TAKEN} DESC"
+            
+            context.contentResolver.query(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                sortOrder
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME)
+                val dateTakenColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_TAKEN)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.SIZE)
+                
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idColumn)
+                    val name = cursor.getString(nameColumn)
+                    val dateTaken = cursor.getLong(dateTakenColumn)
+                    val size = cursor.getLong(sizeColumn)
+                    val path = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATA))
+                    
+                    val contentUri = Uri.withAppendedPath(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        id.toString()
+                    )
+                    
+                    images.add(
+                        GalleryImage(
+                            id = id,
+                            name = name,
+                            path = path,
+                            uri = contentUri,
+                            dateTaken = dateTaken,
+                            size = size
+                        )
+                    )
+                }
+            }
+            
+            Log.d(TAG, "Retrieved ${images.size} images from gallery in time range")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error querying gallery images", e)
+        }
+        
+        images
     }
     
     private suspend fun filterImages(
@@ -204,6 +337,7 @@ class ImageWorkflowOrchestrator(private val context: Context) {
             "documents" -> filterDocumentImages(images)
             "food" -> filterFoodImages(images)
             "text" -> filterImagesWithText(images)
+            "faces" -> filterImagesWithFaces(images)
             "similar_image" -> {
                 if (referenceImageUri != null) {
                     filterSimilarImages(images, referenceImageUri)
@@ -274,6 +408,12 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         }
     }
     
+    private suspend fun filterImagesWithFaces(images: List<GalleryImage>): List<GalleryImage> {
+        return images.filter { image ->
+            detectFacesInImage(image.uri) > 0
+        }
+    }
+    
     private suspend fun filterSimilarImages(
         images: List<GalleryImage>,
         referenceImageUri: Uri
@@ -290,6 +430,19 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Error extracting text from image", e)
             ""
+        }
+    }
+    
+    private suspend fun detectFacesInImage(imageUri: Uri): Int = withContext(Dispatchers.IO) {
+        try {
+            val bitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, imageUri)
+            val image = InputImage.fromBitmap(bitmap, 0)
+            val result = faceDetector.process(image).await()
+            Log.d(TAG, "Detected ${result.size} faces in image")
+            result.size
+        } catch (e: Exception) {
+            Log.e(TAG, "Error detecting faces in image", e)
+            0
         }
     }
     
@@ -375,13 +528,14 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         )
     }
     
-    private fun executeAnalyzeAction(images: List<GalleryImage>): Map<String, Any> {
+    private suspend fun executeAnalyzeAction(images: List<GalleryImage>): Map<String, Any> {
         return mapOf(
             "analysis" to "Analyzed ${images.size} images",
             "imageCount" to images.size,
             "categories" to categorizeImages(images),
             "hasText" to images.any { it.name.contains("text", ignoreCase = true) },
-            "hasReceipts" to images.any { it.name.contains("receipt", ignoreCase = true) }
+            "hasReceipts" to images.any { it.name.contains("receipt", ignoreCase = true) },
+            "hasFaces" to checkForFacesInImages(images)
         )
     }
     
@@ -466,6 +620,16 @@ class ImageWorkflowOrchestrator(private val context: Context) {
         }
         
         return categories.mapValues { it.value }
+    }
+    
+    private suspend fun checkForFacesInImages(images: List<GalleryImage>): Boolean {
+        return images.any { image ->
+            try {
+                detectFacesInImage(image.uri) > 0
+            } catch (e: Exception) {
+                false
+            }
+        }
     }
     
     fun formatResultAsJson(result: WorkflowResult): String {

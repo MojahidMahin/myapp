@@ -68,6 +68,8 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
     var showJsonResult by remember { mutableStateOf(false) }
     var expandedOutputFormat by remember { mutableStateOf(false) }
     var expandedDeliveryMethod by remember { mutableStateOf(false) }
+    var expandedTimeRange by remember { mutableStateOf(false) }
+    var selectedTimeRange by remember { mutableStateOf("last_24_hours") }
     
     val orchestrator = remember { ImageWorkflowOrchestrator(context) }
     
@@ -156,6 +158,100 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                             modifier = Modifier.padding(start = 8.dp)
                         )
                     }
+                }
+            }
+            
+            // Time Range Selector Card
+            ModernCard {
+                Column {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.DateRange,
+                            contentDescription = null,
+                            modifier = Modifier.size(24.dp),
+                            tint = AccentOrange
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "📅 Time Range for Images",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    
+                    ModernSpacing()
+                    
+                    ExposedDropdownMenuBox(
+                        expanded = expandedTimeRange,
+                        onExpandedChange = { expandedTimeRange = !expandedTimeRange },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = when (selectedTimeRange) {
+                                "last_24_hours" -> "⏰ Last 24 Hours"
+                                "yesterday" -> "🌅 Yesterday"
+                                "today" -> "📅 Today"
+                                "past_week" -> "📊 Past Week"
+                                "past_month" -> "📆 Past Month"
+                                "all_time" -> "🌐 All Time"
+                                else -> "⏰ Last 24 Hours"
+                            },
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text("Select time range") },
+                            placeholder = { Text("Choose when images were taken...") },
+                            trailingIcon = { 
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTimeRange)
+                            },
+                            modifier = Modifier
+                                .menuAnchor()
+                                .fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentOrange,
+                                focusedLabelColor = AccentOrange,
+                                unfocusedBorderColor = AccentOrange.copy(alpha = 0.5f)
+                            ),
+                            singleLine = true
+                        )
+                        
+                        ExposedDropdownMenu(
+                            expanded = expandedTimeRange,
+                            onDismissRequest = { expandedTimeRange = false }
+                        ) {
+                            listOf(
+                                "last_24_hours" to "⏰ Last 24 Hours",
+                                "yesterday" to "🌅 Yesterday",
+                                "today" to "📅 Today",
+                                "past_week" to "📊 Past Week",
+                                "past_month" to "📆 Past Month",
+                                "all_time" to "🌐 All Time"
+                            ).forEach { (value, display) ->
+                                DropdownMenuItem(
+                                    text = { 
+                                        Text(
+                                            text = display,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
+                                    onClick = {
+                                        selectedTimeRange = value
+                                        expandedTimeRange = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    
+                    ModernSmallSpacing()
+                    
+                    Text(
+                        text = "This determines which images from your gallery will be analyzed based on when they were taken.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
             
@@ -540,7 +636,8 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                             try {
                                 val result = orchestrator.processWorkflowInstruction(
                                     instruction = instruction,
-                                    referenceImageUri = attachedImageUri
+                                    referenceImageUri = attachedImageUri,
+                                    timeRangeSelection = selectedTimeRange
                                 )
                                 
                                 result.fold(

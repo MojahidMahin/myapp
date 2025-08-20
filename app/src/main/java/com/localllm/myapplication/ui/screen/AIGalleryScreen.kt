@@ -1,6 +1,7 @@
 package com.localllm.myapplication.ui.screen
 
 import android.graphics.Bitmap
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -114,6 +115,12 @@ fun AIGalleryScreen(
                 }
                 AIFeatureType.AUDIO_TRANSCRIPTION -> {
                     AudioTranscriptionFeatureScreen(
+                        viewModel = viewModel,
+                        isProcessing = isProcessing
+                    )
+                }
+                AIFeatureType.GALLERY_ANALYSIS -> {
+                    GalleryAnalysisFeatureScreen(
                         viewModel = viewModel,
                         isProcessing = isProcessing
                     )
@@ -607,6 +614,287 @@ fun AudioTranscriptionFeatureScreen(
                         text = result,
                         modifier = Modifier.padding(16.dp)
                     )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun GalleryAnalysisFeatureScreen(
+    viewModel: AIGalleryViewModel,
+    isProcessing: Boolean
+) {
+    var prompt by remember { mutableStateOf("") }
+    var selectedImages by remember { mutableStateOf<List<Bitmap>>(emptyList()) }
+    var deliveryMethod by remember { mutableStateOf("notification") }
+    var recipientEmail by remember { mutableStateOf("") }
+    var telegramChatId by remember { mutableStateOf("") }
+    var analysisResults by remember { mutableStateOf<List<String>>(emptyList()) }
+    var expandedDeliveryMethod by remember { mutableStateOf(false) }
+    
+    val context = LocalContext.current
+    
+    // Image picker launcher for multiple images
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val bitmaps = mutableListOf<Bitmap>()
+            uris.forEach { uri ->
+                try {
+                    val bitmap = android.provider.MediaStore.Images.Media.getBitmap(
+                        context.contentResolver, uri
+                    )
+                    bitmaps.add(bitmap)
+                } catch (e: Exception) {
+                    Log.e("GalleryAnalysis", "Error loading image", e)
+                }
+            }
+            selectedImages = bitmaps
+        }
+    }
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Welcome Card
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "🤖 Smart Gallery Analysis",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Upload images and let Gemma 3N decide whether to use OCR or face detection, then analyze the results.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        
+        // Image Selection Card
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "📷 Select Images (${selectedImages.size} selected)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    if (selectedImages.isNotEmpty()) {
+                        IconButton(onClick = { selectedImages = emptyList() }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Clear images")
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                Button(
+                    onClick = { imagePickerLauncher.launch("image/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !isProcessing
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("📸 Attach Images from Gallery")
+                }
+                
+                if (selectedImages.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "✅ ${selectedImages.size} image(s) ready for smart analysis",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        
+        // Prompt Input Card
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "💬 Analysis Prompt",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = { prompt = it },
+                    label = { Text("Enter your analysis request") },
+                    placeholder = { Text("e.g., 'What do you see in these images?' or 'Extract all text'") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3,
+                    maxLines = 5,
+                    enabled = !isProcessing
+                )
+            }
+        }
+        
+        // Delivery Method Card  
+        Card(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "📤 Delivery Method",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                ExposedDropdownMenuBox(
+                    expanded = expandedDeliveryMethod,
+                    onExpandedChange = { expandedDeliveryMethod = !expandedDeliveryMethod },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = when (deliveryMethod) {
+                            "email" -> "📧 Email"
+                            "telegram" -> "📱 Telegram"
+                            "notification" -> "🔔 Notification"
+                            else -> "🔔 Notification"
+                        },
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Select delivery method") },
+                        trailingIcon = { 
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDeliveryMethod)
+                        },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth(),
+                        enabled = !isProcessing
+                    )
+                    
+                    ExposedDropdownMenu(
+                        expanded = expandedDeliveryMethod,
+                        onDismissRequest = { expandedDeliveryMethod = false }
+                    ) {
+                        listOf(
+                            "notification" to "🔔 Notification",
+                            "email" to "📧 Email",
+                            "telegram" to "📱 Telegram"
+                        ).forEach { (value, display) ->
+                            DropdownMenuItem(
+                                text = { Text(display) },
+                                onClick = {
+                                    deliveryMethod = value
+                                    expandedDeliveryMethod = false
+                                    // Reset fields when delivery method changes
+                                    recipientEmail = ""
+                                    telegramChatId = ""
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                // Dynamic fields based on delivery method
+                if (deliveryMethod == "email") {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = recipientEmail,
+                        onValueChange = { recipientEmail = it },
+                        label = { Text("📧 Recipient Email") },
+                        placeholder = { Text("email@example.com") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isProcessing
+                    )
+                } else if (deliveryMethod == "telegram") {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = telegramChatId,
+                        onValueChange = { telegramChatId = it },
+                        label = { Text("📱 Telegram Chat ID") },
+                        placeholder = { Text("123456789") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isProcessing
+                    )
+                }
+            }
+        }
+        
+        // Process Button
+        Button(
+            onClick = {
+                if (selectedImages.isNotEmpty() && prompt.isNotBlank()) {
+                    viewModel.processGalleryAnalysis(
+                        images = selectedImages,
+                        prompt = prompt,
+                        deliveryMethod = deliveryMethod,
+                        recipientEmail = recipientEmail,
+                        telegramChatId = telegramChatId
+                    ) { results ->
+                        analysisResults = results
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isProcessing && selectedImages.isNotEmpty() && prompt.isNotBlank()
+        ) {
+            if (isProcessing) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Processing...")
+            } else {
+                Icon(Icons.Default.Star, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("🤖 Start Smart Analysis")
+            }
+        }
+        
+        // Results
+        if (analysisResults.isNotEmpty()) {
+            Card(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Text(
+                        text = "📊 Analysis Results",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    analysisResults.forEach { result ->
+                        Text(
+                            text = result,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+                    }
                 }
             }
         }

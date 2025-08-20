@@ -17,6 +17,7 @@ import com.localllm.myapplication.data.MessageType
 import com.localllm.myapplication.data.PromptTemplate
 import com.localllm.myapplication.data.PromptTemplateFactory
 import com.localllm.myapplication.service.ModelManager
+import com.localllm.myapplication.service.SmartGalleryAnalysisService
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -42,7 +43,8 @@ class AIGalleryViewModel(
             AIFeature(AIFeatureType.LLM_CHAT),
             AIFeature(AIFeatureType.ASK_IMAGE),
             AIFeature(AIFeatureType.AUDIO_TRANSCRIPTION),
-            AIFeature(AIFeatureType.PROMPT_LAB)
+            AIFeature(AIFeatureType.PROMPT_LAB),
+            AIFeature(AIFeatureType.GALLERY_ANALYSIS)
         )
     )
     
@@ -326,6 +328,97 @@ class AIGalleryViewModel(
             if (!lastMessage.isFromUser) {
                 currentMessages[currentMessages.lastIndex] = lastMessage.copy(text = newText)
                 chatMessages.value = currentMessages
+            }
+        }
+    }
+    
+    /**
+     * Process gallery analysis using Gemma 3N
+     */
+    fun processGalleryAnalysis(
+        images: List<Bitmap>,
+        prompt: String,
+        deliveryMethod: String,
+        recipientEmail: String,
+        telegramChatId: String,
+        onResult: (List<String>) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                isProcessing.value = true
+                
+                // Create smart gallery analysis service
+                val smartService = SmartGalleryAnalysisService(context, modelManager)
+                
+                // Perform analysis
+                val result = smartService.analyzeImages(images, prompt)
+                
+                if (result.success) {
+                    Log.d(TAG, "✅ Gemma 3N analysis completed successfully")
+                    
+                    // Format results for display
+                    val displayResults = mutableListOf<String>()
+                    displayResults.add("🤖 Gemma 3N Analysis Complete!")
+                    displayResults.add("📊 Analyzed ${result.totalImages} images")
+                    displayResults.add("")
+                    displayResults.add("📝 Final Summary:")
+                    displayResults.add(result.finalSummary)
+                    displayResults.add("")
+                    
+                    // Add individual image results
+                    result.imageResults.forEachIndexed { index, imageResult ->
+                        displayResults.add("📷 Image ${index + 1}:")
+                        if (imageResult.textFound.isNotBlank()) {
+                            displayResults.add("  📝 Text: ${imageResult.textFound}")
+                        }
+                        if (imageResult.facesCount > 0) {
+                            displayResults.add("  👥 Faces: ${imageResult.facesCount}")
+                        }
+                        displayResults.add("  🔍 Description: ${imageResult.description}")
+                        displayResults.add("  💬 Answer: ${imageResult.answer}")
+                        displayResults.add("")
+                    }
+                    
+                    // Handle delivery if requested
+                    if (deliveryMethod != "notification") {
+                        displayResults.add("📤 Delivery: Processing...")
+                        // TODO: Implement actual delivery via email/telegram
+                        when (deliveryMethod) {
+                            "email" -> {
+                                displayResults.add("📧 Email delivery to: $recipientEmail")
+                                displayResults.add("⚠️ Email delivery not yet implemented")
+                            }
+                            "telegram" -> {
+                                displayResults.add("📱 Telegram delivery to: $telegramChatId")
+                                displayResults.add("⚠️ Telegram delivery not yet implemented")
+                            }
+                        }
+                    }
+                    
+                    onResult(displayResults)
+                } else {
+                    Log.e(TAG, "❌ Gemma 3N analysis failed: ${result.reasoning}")
+                    onResult(listOf(
+                        "❌ Analysis Failed",
+                        result.reasoning,
+                        "",
+                        "Please check that:",
+                        "- Gemma 3N model is loaded",
+                        "- Images are valid",
+                        "- Prompt is clear"
+                    ))
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Gallery analysis error", e)
+                onResult(listOf(
+                    "❌ Error during analysis",
+                    "Error: ${e.message}",
+                    "",
+                    "Please try again or check the logs."
+                ))
+            } finally {
+                isProcessing.value = false
             }
         }
     }

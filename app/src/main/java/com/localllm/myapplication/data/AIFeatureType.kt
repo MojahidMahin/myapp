@@ -34,6 +34,12 @@ enum class AIFeatureType(
         label = "Prompt Lab",
         description = "Single turn use cases with prompt templates",
         icon = Icons.Filled.Send
+    ),
+    GALLERY_ANALYSIS(
+        id = "gallery_analysis",
+        label = "Gallery Analysis",
+        description = "Smart AI analysis of gallery images with OCR and face detection",
+        icon = Icons.Filled.Add
     )
 }
 

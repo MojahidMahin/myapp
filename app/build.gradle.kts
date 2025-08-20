@@ -120,8 +120,9 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-gpu:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
     
-    // Google ML Kit for OCR (text recognition)
+    // Google ML Kit for OCR (text recognition) and face detection
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:face-detection:16.1.7")
     
     // Google Play Services for location and geofencing
     implementation("com.google.android.gms:play-services-location:21.0.1")
