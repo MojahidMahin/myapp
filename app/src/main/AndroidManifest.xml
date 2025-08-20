@@ -194,6 +194,12 @@
             android:label="Contacts"
             android:theme="@style/Theme.MyApplication" />
 
+        <activity
+            android:name=".ui.ImageWorkflowOrchestratorActivity"
+            android:exported="false"
+            android:label="Image Workflow Orchestrator"
+            android:theme="@style/Theme.MyApplication" />
+
         <!-- Geofence Broadcast Receiver -->
         <receiver
             android:name=".service.GeofenceBroadcastReceiver"

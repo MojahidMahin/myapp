@@ -572,6 +572,71 @@ private fun DrawerContent(
         
         Spacer(modifier = Modifier.height(16.dp))
         
+        // App Navigation Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "🚀 App Features",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = {
+                        val intent = Intent(context, com.localllm.myapplication.ui.ImageWorkflowOrchestratorActivity::class.java)
+                        context.startActivity(intent)
+                        onCloseDrawer()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Text("🎬 Image Workflow Orchestrator")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = {
+                        val intent = Intent(context, com.localllm.myapplication.ui.WorkflowManagerActivity::class.java)
+                        context.startActivity(intent)
+                        onCloseDrawer()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Text("⚙️ Workflow Manager")
+                }
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Button(
+                    onClick = {
+                        val intent = Intent(context, com.localllm.myapplication.ui.ChatActivity::class.java)
+                        context.startActivity(intent)
+                        onCloseDrawer()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text("💬 AI Chat")
+                }
+            }
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
         // Background Processing Tests Section
         Card(
             modifier = Modifier.fillMaxWidth(),

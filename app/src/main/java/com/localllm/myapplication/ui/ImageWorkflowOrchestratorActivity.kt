@@ -111,7 +111,7 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                         Icon(
                             Icons.Default.Star,
                             contentDescription = null,
-                            modifier = Modifier.size(32.dp),
+                            modifier = Modifier.size(24.dp),
                             tint = AccentBlue
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -210,7 +210,7 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                Icons.Default.Favorite,
+                                Icons.Default.Star,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp),
                                 tint = AccentBlue
@@ -273,13 +273,35 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                         ModernSmallSpacing()
                     }
                     
-                    ModernSecondaryButton(
-                        text = if (attachedImageUri != null) "Change Attached Image" else "Attach Image from Gallery",
+                    // Enhanced image picker button
+                    Button(
                         onClick = {
                             val intent = Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
                             imagePickerLauncher.launch(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (attachedImageUri != null) AccentOrange else AccentBlue
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                if (attachedImageUri != null) Icons.Default.Edit else Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (attachedImageUri != null) "Change Attached Image" else "📷 Select Image from Gallery",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
-                    )
+                    }
                 }
             }
             
@@ -305,6 +327,7 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                     
                     ModernSpacing()
                     
+                    // Enhanced dropdown styling
                     ExposedDropdownMenuBox(
                         expanded = expandedOutputFormat,
                         onExpandedChange = { expandedOutputFormat = !expandedOutputFormat },
@@ -319,16 +342,21 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                             },
                             onValueChange = { },
                             readOnly = true,
-                            label = { Text("Select format") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedOutputFormat) },
+                            label = { Text("Select output format") },
+                            placeholder = { Text("Choose format...") },
+                            trailingIcon = { 
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedOutputFormat)
+                            },
                             modifier = Modifier
                                 .menuAnchor()
                                 .fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = AccentOrange,
-                                focusedLabelColor = AccentOrange
-                            )
+                                focusedLabelColor = AccentOrange,
+                                unfocusedBorderColor = AccentOrange.copy(alpha = 0.5f)
+                            ),
+                            singleLine = true
                         )
                         
                         ExposedDropdownMenu(
@@ -341,7 +369,12 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                                 "summary" to "Summary"
                             ).forEach { (value, display) ->
                                 DropdownMenuItem(
-                                    text = { Text(display) },
+                                    text = { 
+                                        Text(
+                                            text = display,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
                                     onClick = {
                                         outputFormat = value
                                         expandedOutputFormat = false
@@ -375,6 +408,7 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                     
                     ModernSpacing()
                     
+                    // Enhanced delivery method dropdown
                     ExposedDropdownMenuBox(
                         expanded = expandedDeliveryMethod,
                         onExpandedChange = { expandedDeliveryMethod = !expandedDeliveryMethod },
@@ -382,23 +416,28 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                     ) {
                         OutlinedTextField(
                             value = when (deliveryMethod) {
-                                "email" -> "Email"
-                                "telegram" -> "Telegram"
-                                "notification" -> "Notification"
-                                else -> "None"
+                                "email" -> "📧 Email"
+                                "telegram" -> "📱 Telegram"
+                                "notification" -> "🔔 Notification"
+                                else -> "❌ None"
                             },
                             onValueChange = { },
                             readOnly = true,
                             label = { Text("Select delivery method") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDeliveryMethod) },
+                            placeholder = { Text("Choose delivery method...") },
+                            trailingIcon = { 
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDeliveryMethod)
+                            },
                             modifier = Modifier
                                 .menuAnchor()
                                 .fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = AccentGreen,
-                                focusedLabelColor = AccentGreen
-                            )
+                                focusedLabelColor = AccentGreen,
+                                unfocusedBorderColor = AccentGreen.copy(alpha = 0.5f)
+                            ),
+                            singleLine = true
                         )
                         
                         ExposedDropdownMenu(
@@ -406,13 +445,18 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                             onDismissRequest = { expandedDeliveryMethod = false }
                         ) {
                             listOf(
-                                null to "None",
-                                "email" to "Email",
-                                "telegram" to "Telegram",
-                                "notification" to "Notification"
+                                null to "❌ None",
+                                "email" to "📧 Email",
+                                "telegram" to "📱 Telegram",
+                                "notification" to "🔔 Notification"
                             ).forEach { (value, display) ->
                                 DropdownMenuItem(
-                                    text = { Text(display) },
+                                    text = { 
+                                        Text(
+                                            text = display,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    },
                                     onClick = {
                                         deliveryMethod = value
                                         expandedDeliveryMethod = false
@@ -435,42 +479,47 @@ private fun ImageWorkflowOrchestratorScreen(onNavigateBack: () -> Unit) {
                                 OutlinedTextField(
                                     value = recipientEmails,
                                     onValueChange = { recipientEmails = it },
-                                    label = { Text("Recipient Emails") },
+                                    label = { Text("📧 Recipient Emails") },
                                     placeholder = { Text("email1@example.com, email2@example.com") },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = AccentGreen,
                                         focusedLabelColor = AccentGreen
-                                    )
+                                    ),
+                                    singleLine = false,
+                                    minLines = 2,
+                                    maxLines = 3
                                 )
                             }
                             "telegram" -> {
                                 OutlinedTextField(
                                     value = telegramChatId,
                                     onValueChange = { telegramChatId = it },
-                                    label = { Text("Telegram Chat ID") },
-                                    placeholder = { Text("Enter chat ID") },
+                                    label = { Text("📱 Telegram Chat ID") },
+                                    placeholder = { Text("Enter chat ID (e.g., 123456789)") },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = AccentGreen,
                                         focusedLabelColor = AccentGreen
-                                    )
+                                    ),
+                                    singleLine = true
                                 )
                             }
                             "notification" -> {
                                 OutlinedTextField(
                                     value = notificationTitle,
                                     onValueChange = { notificationTitle = it },
-                                    label = { Text("Notification Title") },
+                                    label = { Text("🔔 Notification Title") },
                                     placeholder = { Text("Enter notification title") },
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(12.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = AccentGreen,
                                         focusedLabelColor = AccentGreen
-                                    )
+                                    ),
+                                    singleLine = true
                                 )
                             }
                         }
